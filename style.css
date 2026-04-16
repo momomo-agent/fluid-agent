@@ -420,6 +420,74 @@ select.settings-input { appearance: none; cursor: pointer; }
 #chat-input-area { position: relative; }
 .settings-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
 
+/* ── Chat separator ── */
+.chat-separator {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 8px 0;
+  opacity: 0.6;
+  position: relative;
+}
+.chat-separator::before, .chat-separator::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 30%;
+  height: 1px;
+  background: var(--border);
+}
+.chat-separator::before { left: 5%; }
+.chat-separator::after { right: 5%; }
+
+/* ── Notification Center ── */
+#notification-center { position: relative; margin-left: auto; }
+#notif-btn {
+  background: none; border: none; font-size: 16px; cursor: pointer;
+  position: relative; padding: 4px 8px; border-radius: 6px;
+}
+#notif-btn:hover { background: var(--surface-2); }
+#notif-badge {
+  position: absolute; top: 0; right: 2px;
+  background: #ef4444; color: white; font-size: 10px;
+  min-width: 16px; height: 16px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600;
+}
+#notif-badge.hidden { display: none; }
+#notif-panel {
+  position: absolute; top: 100%; right: 0; width: 300px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  z-index: 9999; overflow: hidden;
+}
+#notif-panel.hidden { display: none; }
+.notif-header {
+  padding: 10px 14px; font-size: 12px; font-weight: 600;
+  color: var(--text-muted); border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.notif-header button {
+  background: none; border: none; color: var(--accent);
+  font-size: 11px; cursor: pointer;
+}
+#notif-list { max-height: 300px; overflow-y: auto; }
+.notif-item {
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  font-size: 13px; line-height: 1.4; cursor: default;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item .notif-time { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+.notif-item.unread { background: rgba(99, 102, 241, 0.08); }
+#notif-empty { padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px; }
+
+/* ── Drag & Drop ── */
+#chat-panel.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+  background: rgba(99, 102, 241, 0.05);
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   #app { flex-direction: column; }

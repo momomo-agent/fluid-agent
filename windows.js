@@ -884,10 +884,29 @@ const WindowManager = (() => {
   // --- Generative App ---
   const installedApps = new Map() // name -> { html, css, js, icon, width, height }
 
+  // Persist apps
+  function saveApps() {
+    try {
+      const obj = {}
+      for (const [k, v] of installedApps) obj[k] = v
+      localStorage.setItem('fluid-apps', JSON.stringify(obj))
+    } catch (e) {}
+  }
+  function loadApps() {
+    try {
+      const saved = localStorage.getItem('fluid-apps')
+      if (saved) {
+        const obj = JSON.parse(saved)
+        for (const [k, v] of Object.entries(obj)) installedApps.set(k, v)
+      }
+    } catch (e) {}
+  }
+  loadApps()
+
   function openApp(name, html, css, js, opts = {}) {
-    // Save to installed apps for re-opening
     if (html) {
       installedApps.set(name, { html, css: css || '', js: js || '', icon: opts.icon || '💻', width: opts.width || 420, height: opts.height || 360 })
+      saveApps()
     }
     const app = installedApps.get(name)
     if (!app) return null

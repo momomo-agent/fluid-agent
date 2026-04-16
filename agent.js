@@ -4,7 +4,45 @@ const Agent = (() => {
   const messages = []
   let workerRunning = false
   let workerAbort = null
-  const taskQueue = [] // pending tasks
+  const taskQueue = []
+
+  // --- Chat persistence ---
+  function saveChat() {
+    try {
+      const toSave = messages.slice(-50) // Keep last 50 messages
+      localStorage.setItem('fluid-chat', JSON.stringify(toSave))
+    } catch (e) {}
+  }
+
+  function loadChat() {
+    try {
+      const saved = localStorage.getItem('fluid-chat')
+      if (saved) {
+        const restored = JSON.parse(saved)
+        messages.push(...restored)
+        return restored
+      }
+    } catch (e) {}
+    return []
+  }
+
+  function restoreChatUI() {
+    const container = document.getElementById('chat-messages')
+    if (!container) return
+    const restored = loadChat()
+    if (restored.length === 0) return
+    // Show a separator
+    const sep = document.createElement('div')
+    sep.className = 'chat-separator'
+    sep.textContent = 'Previous session'
+    container.appendChild(sep)
+    // Render last 10 messages
+    restored.slice(-10).forEach(m => {
+      if (m.role === 'user' || m.role === 'assistant') {
+        addBubble(m.role === 'assistant' ? 'agent' : 'user', m.content?.slice(0, 500) || '')
+      }
+    })
+  } // pending tasks
 
   const blackboard = { currentTask: null, directive: null, completedSteps: [], workerLog: [] }
 
@@ -63,6 +101,7 @@ const Agent = (() => {
   async function chat(userMessage) {
     addBubble('user', userMessage)
     messages.push({ role: 'user', content: userMessage })
+    saveChat()
 
     const bubble = createStreamBubble()
     let fullReply = ''
@@ -95,6 +134,7 @@ const Agent = (() => {
       }
 
       messages.push({ role: 'assistant', content: fullReply })
+      saveChat()
 
       const action = parseAction(fullReply)
       if (action?.action === 'execute' || action?.action === 'redirect') {
@@ -481,6 +521,7 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
               lastProactive = Date.now()
               notify(decision.message)
               messages.push({ role: 'assistant', content: decision.message })
+              saveChat()
             }
           }
         } catch (e) { /* parse error, skip */ }
@@ -531,6 +572,7 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
       }
 
       messages.push({ role: 'assistant', content: fullReply })
+      saveChat()
 
       // Speak if voice enabled
       if (Voice?.isEnabled()) Voice.speak(fullReply)
@@ -541,10 +583,11 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
       const text = summary || `Done: ${taskDesc}`
       addBubble('agent', text)
       messages.push({ role: 'assistant', content: text })
+      saveChat()
     }
 
     setTimeout(() => setWorkerStatus(''), 3000)
   }
 
-  return { configure, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify }
+  return { configure, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI }
 })() 

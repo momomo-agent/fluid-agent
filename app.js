@@ -53,12 +53,15 @@
     // Open initial Finder window
     WindowManager.openFinder('/home/user/Desktop')
 
-    // Welcome message
+    // Restore previous chat or show welcome
     const container = document.getElementById('chat-messages')
-    const bubble = document.createElement('div')
-    bubble.className = 'chat-bubble agent'
-    bubble.textContent = "Hey! I'm Fluid Agent — I am this OS. Ask me to create files, write code, organize your desktop, or just chat. You can interrupt me anytime."
-    container.appendChild(bubble)
+    Agent.restoreChatUI()
+    if (container.children.length === 0) {
+      const bubble = document.createElement('div')
+      bubble.className = 'chat-bubble agent'
+      bubble.textContent = "Hey! I'm Fluid Agent — part companion, part OS. Ask me anything, or tell me to do something."
+      container.appendChild(bubble)
+    }
 
     // Wire chat input
     const chatInput = document.getElementById('chat-input')
@@ -166,5 +169,108 @@
       })
       voiceBtn.addEventListener('touchcancel', endPtt)
     }
+
+    // --- Notification Center ---
+    const notifBtn = document.getElementById('notif-btn')
+    const notifPanel = document.getElementById('notif-panel')
+    const notifList = document.getElementById('notif-list')
+    const notifBadge = document.getElementById('notif-badge')
+    const notifEmpty = document.getElementById('notif-empty')
+    const notifClear = document.getElementById('notif-clear')
+    let notifItems = []
+    let unreadCount = 0
+
+    // Load persisted notifications
+    try {
+      const saved = localStorage.getItem('fluid-notifs')
+      if (saved) notifItems = JSON.parse(saved)
+    } catch (e) {}
+
+    function renderNotifs() {
+      notifList.innerHTML = ''
+      notifEmpty.style.display = notifItems.length === 0 ? 'block' : 'none'
+      notifItems.slice(-20).reverse().forEach(n => {
+        const el = document.createElement('div')
+        el.className = `notif-item${n.unread ? ' unread' : ''}`
+        el.innerHTML = `<div>${n.text}</div><div class="notif-time">${new Date(n.time).toLocaleTimeString()}</div>`
+        notifList.appendChild(el)
+      })
+      notifBadge.textContent = unreadCount
+      notifBadge.classList.toggle('hidden', unreadCount === 0)
+    }
+
+    function addNotification(text) {
+      notifItems.push({ text, time: Date.now(), unread: true })
+      unreadCount++
+      if (notifItems.length > 50) notifItems = notifItems.slice(-50)
+      try { localStorage.setItem('fluid-notifs', JSON.stringify(notifItems)) } catch (e) {}
+      renderNotifs()
+    }
+
+    notifBtn.addEventListener('click', () => {
+      notifPanel.classList.toggle('hidden')
+      if (!notifPanel.classList.contains('hidden')) {
+        unreadCount = 0
+        notifItems.forEach(n => n.unread = false)
+        renderNotifs()
+        try { localStorage.setItem('fluid-notifs', JSON.stringify(notifItems)) } catch (e) {}
+      }
+    })
+
+    notifClear.addEventListener('click', () => {
+      notifItems = []; unreadCount = 0
+      localStorage.removeItem('fluid-notifs')
+      renderNotifs()
+    })
+
+    // Close panel on outside click
+    document.addEventListener('click', (e) => {
+      if (!notifPanel.contains(e.target) && e.target !== notifBtn && !notifBtn.contains(e.target)) {
+        notifPanel.classList.add('hidden')
+      }
+    })
+
+    renderNotifs()
+
+    // Hook into Agent.notify to also push to notification center
+    const origNotify = Agent.notify
+    Agent.notify = function(text, type) {
+      origNotify.call(Agent, text, type)
+      addNotification(text)
+    }
+
+    // --- Drag & Drop to Chat ---
+    const chatArea = document.getElementById('chat-panel')
+    chatArea.addEventListener('dragover', (e) => {
+      e.preventDefault()
+      chatArea.classList.add('drag-over')
+    })
+    chatArea.addEventListener('dragleave', () => {
+      chatArea.classList.remove('drag-over')
+    })
+    chatArea.addEventListener('drop', (e) => {
+      e.preventDefault()
+      chatArea.classList.remove('drag-over')
+      const files = e.dataTransfer.files
+      if (files.length > 0) {
+        Array.from(files).forEach(file => {
+          const reader = new FileReader()
+          reader.onload = () => {
+            const content = reader.result
+            // Save to VFS
+            const vfsPath = `/home/user/Downloads/${file.name}`
+            VFS.writeFile(vfsPath, content)
+            // Tell agent about it
+            Agent.chat(`I just dropped a file: ${file.name} (${(file.size / 1024).toFixed(1)}KB, ${file.type || 'unknown type'}). It's saved at ${vfsPath}. Take a look.`)
+          }
+          reader.readAsText(file)
+        })
+      }
+      // Handle text drops
+      const text = e.dataTransfer.getData('text/plain')
+      if (text && !files.length) {
+        Agent.chat(`[Dropped text]: ${text}`)
+      }
+    })
   }
 })() 
