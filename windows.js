@@ -276,19 +276,19 @@ const WindowManager = (() => {
 
   // ── Helpers ──
   function openFinder(path) {
-    return create({ type: 'finder', title: path.split('/').pop() || '/', x: 60, y: 40, width: 520, height: 380, data: { path } })
+    return create({ type: 'finder', title: path.split('/').pop() || '/', x: 40, y: 30, width: 520, height: 380, data: { path } })
   }
 
   function openTerminal() {
-    return create({ type: 'terminal', title: 'Terminal', x: 100, y: 80, width: 560, height: 360 })
+    return create({ type: 'terminal', title: 'Terminal', x: 200, y: 100, width: 560, height: 360 })
   }
 
   function openEditor(path) {
-    return create({ type: 'editor', title: path.split('/').pop(), x: 140, y: 60, width: 500, height: 400, data: { path } })
+    return create({ type: 'editor', title: path.split('/').pop(), x: 120, y: 60, width: 500, height: 400, data: { path } })
   }
 
   function openPlan(goal, steps) {
-    return create({ type: 'plan', title: 'Plan', x: 80, y: 50, width: 400, height: 320, data: { goal, steps } })
+    return create({ type: 'plan', title: 'Plan', x: 300, y: 50, width: 400, height: 320, data: { goal, steps } })
   }
 
   // Refresh all finder windows when FS changes
