@@ -220,6 +220,14 @@ For pure conversation, just reply normally. Keep replies concise.`
       close_window: ({ title }) => { const ok = WindowManager.closeByTitle(title); return { success: ok } },
       focus_window: ({ title }) => { const ok = WindowManager.focusByTitle(title); return { success: ok } },
       list_windows: () => ({ windows: WindowManager.getState().windows }),
+      update_progress: ({ step_index }) => {
+        if (step_index >= 0 && step_index < steps.length) {
+          for (let i = 0; i <= step_index; i++) steps[i].status = 'done'
+          if (step_index + 1 < steps.length) steps[step_index + 1].status = 'running'
+          WindowManager.updateTask(task)
+        }
+        return { success: true }
+      },
       done: ({ summary }) => { showActivity(`✅ ${summary}`); return { done: true, summary } },
     }
 
@@ -235,8 +243,12 @@ For pure conversation, just reply normally. Keep replies concise.`
       open_image: { desc: 'Open and display an image by URL or path', schema: { type: 'object', properties: { src: { type: 'string', description: 'Image URL or path' }, title: { type: 'string' } }, required: ['src'] } },
       focus_window: { desc: 'Focus/bring a window to front by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
       list_windows: { desc: 'List all open windows', schema: { type: 'object', properties: {} } },
+      update_progress: { desc: 'Mark a step as done by index (0-based). Call this after completing each planned step.', schema: { type: 'object', properties: { step_index: { type: 'number', description: '0-based step index' } }, required: ['step_index'] } },
       done: { desc: 'Signal task completion', schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
     }
+
+    // Mark first step as running
+    if (steps.length > 0) { steps[0].status = 'running'; WindowManager.updateTask(task) }
 
     const tools = Object.entries(toolDefs).map(([name, { desc, schema }]) => ({
       name, description: desc, input_schema: schema,
@@ -245,10 +257,10 @@ For pure conversation, just reply normally. Keep replies concise.`
         blackboard.workerLog.push({ tool: name, params, time: Date.now() })
         task.log.push(`${name}: ${JSON.stringify(params).slice(0, 60)}`)
 
-        // Check for steer directive — inject into next system prompt
+        // Check for steer directive
         if (blackboard.directive?.type === 'steer') {
           task.log.push(`↪ Steered: ${blackboard.directive.instruction}`)
-          blackboard.directive = null // consumed
+          blackboard.directive = null
         }
 
         const result = toolHandlers[name](params)
@@ -258,7 +270,7 @@ For pure conversation, just reply normally. Keep replies concise.`
           task.status = 'done'
           blackboard.currentTask.status = 'done'
           setWorkerStatus(taskQueue.length > 0 ? `⏳ ${taskQueue.length} queued` : '✅ Done')
-          steps.forEach(s => { s.status = 'done' })
+          steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
           WindowManager.updateTask(task)
         }
         return result
@@ -277,6 +289,10 @@ Current OS state:
 - Working directory: ${os.cwd}
 - Desktop files: ${JSON.stringify(os.desktop)}${steerNote}
 
+Planned steps:
+${steps.map((s, i) => `${i}. ${s.text}`).join('\n')}
+
+IMPORTANT: After completing each planned step, call update_progress with the step_index to show progress to the user.
 Execute efficiently. Use list_windows to see what's open. Use close_window/focus_window to manage windows.
 When finished, call the done tool with a summary.`,
         stream: false,
