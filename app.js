@@ -344,64 +344,17 @@
       micBtn.addEventListener('mouseleave', stopMic)
     }
 
-    // --- Notification Center ---
-    const notifBtn = document.getElementById('notif-btn')
-    const notifPanel = document.getElementById('notif-panel')
-    const notifList = document.getElementById('notif-list')
-    const notifBadge = document.getElementById('notif-badge')
-    const notifEmpty = document.getElementById('notif-empty')
-    const notifClear = document.getElementById('notif-clear')
-    let notifItems = []
-    let unreadCount = 0
-
-    // Load persisted notifications via agentic glue
-    if (ai) ai.load('notifs').then(saved => { if (saved) { notifItems = saved; renderNotifs() } })
-    function saveNotifs() { if (ai) ai.save('notifs', notifItems) }
-
-    function renderNotifs() {
-      notifList.innerHTML = ''
-      notifEmpty.style.display = notifItems.length === 0 ? 'block' : 'none'
-      notifItems.slice(-20).reverse().forEach(n => {
-        const el = document.createElement('div')
-        el.className = `notif-item${n.unread ? ' unread' : ''}`
-        el.innerHTML = `<div>${n.text}</div><div class="notif-time">${new Date(n.time).toLocaleTimeString()}</div>`
-        notifList.appendChild(el)
-      })
-      notifBadge.textContent = unreadCount
-      notifBadge.classList.toggle('hidden', unreadCount === 0)
-    }
-
-    function addNotification(text) {
-      notifItems.push({ text, time: Date.now(), unread: true })
-      unreadCount++
-      if (notifItems.length > 50) notifItems = notifItems.slice(-50)
-      saveNotifs()
-      renderNotifs()
-    }
-
-    notifBtn.addEventListener('click', () => {
-      notifPanel.classList.toggle('hidden')
-      if (!notifPanel.classList.contains('hidden')) {
-        unreadCount = 0
-        notifItems.forEach(n => n.unread = false)
-        renderNotifs()
-        saveNotifs()
-      }
-    })
-
-    notifClear.addEventListener('click', () => {
-      notifItems = []; unreadCount = 0
-      if (ai) ai.deleteKey('notifs')
-      renderNotifs()
-    })
-
-    renderNotifs()
-
-    // Hook into Agent.notify
+    // --- Notifications go straight to chat ---
     const origNotify = Agent.notify
     Agent.notify = function(text, type) {
       origNotify.call(Agent, text, type)
-      addNotification(text)
+      // Post as agent message in chat
+      const container = document.getElementById('chat-messages')
+      const bubble = document.createElement('div')
+      bubble.className = 'chat-bubble agent'
+      bubble.textContent = text
+      container.appendChild(bubble)
+      container.scrollTop = container.scrollHeight
     }
 
     // --- Drag & Drop to Chat ---
