@@ -291,6 +291,63 @@ const WindowManager = (() => {
     return create({ type: 'plan', title: 'Plan', x: 300, y: 50, width: 400, height: 320, data: { goal, steps } })
   }
 
+  let taskManagerId = null
+  const taskHistory = [] // { id, goal, steps, status, log, startTime }
+
+  function openTaskManager() {
+    if (taskManagerId && windows.has(taskManagerId)) {
+      focus(taskManagerId)
+      return taskManagerId
+    }
+    taskManagerId = create({ type: 'taskmanager', title: 'Task Manager', x: 300, y: 50, width: 520, height: 380 })
+    renderTaskManager()
+    return taskManagerId
+  }
+
+  function addTask(goal, steps) {
+    const task = { id: 'task-' + Date.now(), goal, steps: steps.map(s => ({ text: s, status: 'pending' })), status: 'running', log: [], startTime: Date.now() }
+    taskHistory.unshift(task)
+    if (taskHistory.length > 20) taskHistory.pop()
+    openTaskManager()
+    renderTaskManager(task.id)
+    return task
+  }
+
+  function updateTask(task) {
+    if (taskManagerId && windows.has(taskManagerId)) renderTaskManager(task?.id)
+  }
+
+  function renderTaskManager(selectedId) {
+    const w = windows.get(taskManagerId)
+    if (!w) return
+    const body = w.el.querySelector('.window-body')
+    const sel = selectedId || taskHistory[0]?.id
+    const selected = taskHistory.find(t => t.id === sel) || taskHistory[0]
+
+    body.innerHTML = `<div class="tm-layout">
+      <div class="tm-list">${taskHistory.map(t => `
+        <div class="tm-item ${t.status} ${t.id === selected?.id ? 'active' : ''}" data-id="${t.id}">
+          <span class="tm-status-dot"></span>
+          <span class="tm-goal">${t.goal.slice(0, 40)}${t.goal.length > 40 ? '…' : ''}</span>
+        </div>`).join('') || '<div class="tm-empty">No tasks yet</div>'}
+      </div>
+      <div class="tm-detail">${selected ? `
+        <div class="tm-detail-goal">${selected.goal}</div>
+        <div class="tm-steps">${selected.steps.map(s => `
+          <div class="tm-step ${s.status}">
+            <span class="tm-step-icon">${s.status === 'done' ? '✓' : s.status === 'running' ? '▶' : s.status === 'aborted' ? '✕' : '○'}</span>
+            <span>${s.text}</span>
+          </div>`).join('')}
+        </div>
+        ${selected.log.length ? `<div class="tm-log">${selected.log.slice(-8).map(l => `<div class="tm-log-line">${l}</div>`).join('')}</div>` : ''}
+      ` : '<div class="tm-empty">Select a task</div>'}</div>
+    </div>`
+
+    body.querySelectorAll('.tm-item').forEach(el => {
+      el.addEventListener('click', () => renderTaskManager(el.dataset.id))
+    })
+  }
+
   // Refresh all finder windows when FS changes
   VFS.on((event, path) => {
     windows.forEach(w => {
@@ -341,5 +398,5 @@ const WindowManager = (() => {
     return id
   }
 
-  return { create, close, focus, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, windows, getState, closeByTitle, focusByTitle }
+  return { create, close, focus, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openTaskManager, addTask, updateTask, windows, getState, closeByTitle, focusByTitle }
 })()

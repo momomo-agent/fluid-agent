@@ -150,19 +150,13 @@ For pure conversation, just reply normally. Keep replies concise.`
 
     const abort = new AbortController()
     workerAbort = abort
-    const steps = (plannedSteps || []).map(s => ({ text: s, status: 'pending' }))
-    blackboard.currentTask = { goal: taskDescription, steps, currentStep: 0, status: 'running' }
+    // Use Task Manager instead of Plan window
+    const task = WindowManager.addTask(taskDescription, plannedSteps || [])
+    const steps = task.steps
+    blackboard.currentTask = { goal: taskDescription, steps, status: 'running' }
     blackboard.directive = null
     blackboard.completedSteps = []
     blackboard.workerLog = []
-
-    // Reuse existing plan window or open new one
-    if (planWinId && WindowManager.windows.has(planWinId)) {
-      WindowManager.updatePlan(planWinId, taskDescription, steps)
-      WindowManager.focus(planWinId)
-    } else {
-      planWinId = WindowManager.openPlan(taskDescription, steps)
-    }
 
     setWorkerStatus('🔄 Working...')
     showActivity(`Starting: ${taskDescription.slice(0, 50)}...`)
@@ -216,24 +210,17 @@ For pure conversation, just reply normally. Keep replies concise.`
       execute: (params) => {
         if (abort.signal.aborted) throw new Error('aborted')
         blackboard.workerLog.push({ tool: name, params, time: Date.now() })
-
-        const stepIdx = blackboard.currentTask.currentStep
-        if (steps[stepIdx]) { steps[stepIdx].status = 'running'; WindowManager.updatePlan(planWinId, taskDescription, steps) }
+        task.log.push(`${name}: ${JSON.stringify(params).slice(0, 60)}`)
 
         const result = toolHandlers[name](params)
-
-        if (steps[stepIdx]) {
-          steps[stepIdx].status = 'done'
-          blackboard.currentTask.currentStep++
-          blackboard.completedSteps.push(steps[stepIdx])
-          WindowManager.updatePlan(planWinId, taskDescription, steps)
-        }
+        WindowManager.updateTask(task)
 
         if (result.done) {
+          task.status = 'done'
           blackboard.currentTask.status = 'done'
           setWorkerStatus('✅ Done')
-          steps.forEach(s => { if (s.status === 'pending') s.status = 'done' })
-          WindowManager.updatePlan(planWinId, taskDescription, steps)
+          steps.forEach(s => { s.status = 'done' })
+          WindowManager.updateTask(task)
         }
         return result
       }
@@ -256,22 +243,29 @@ When finished, call the done tool with a summary.`,
       })
 
       if (blackboard.currentTask?.status !== 'done') {
+        task.status = 'done'
         blackboard.currentTask.status = 'done'
         setWorkerStatus('✅ Done')
+        steps.forEach(s => { if (s.status === 'pending') s.status = 'done' })
+        WindowManager.updateTask(task)
         setTimeout(() => setWorkerStatus(''), 3000)
       }
     } catch (err) {
       if (err.message === 'aborted' || abort.signal.aborted) {
+        task.status = 'aborted'
         blackboard.currentTask.status = 'aborted'
         setWorkerStatus('⏹ Interrupted')
         showActivity('Task interrupted')
         steps.forEach(s => { if (s.status === 'pending' || s.status === 'running') s.status = 'aborted' })
-        WindowManager.updatePlan(planWinId, taskDescription, steps)
+        WindowManager.updateTask(task)
         setTimeout(() => setWorkerStatus(''), 2000)
       } else {
+        task.status = 'error'
+        task.log.push(`Error: ${err.message}`)
         setWorkerStatus('❌ Error')
         showActivity(`Error: ${err.message}`)
         addBubble('system', `Worker error: ${err.message}`)
+        WindowManager.updateTask(task)
       }
     }
     workerAbort = null
