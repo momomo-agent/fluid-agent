@@ -332,5 +332,14 @@ const WindowManager = (() => {
     return false
   }
 
-  return { create, close, focus, openFinder, openTerminal, openEditor, openPlan, updatePlan, windows, getState, closeByTitle, focusByTitle }
+  function openImage(src, title) {
+    const id = create('image', { src, path: src })
+    const w = windows.get(id)
+    const body = w.el.querySelector('.window-body')
+    w.el.querySelector('.window-title').textContent = title || src.split('/').pop()
+    body.innerHTML = `<div class="image-viewer"><img src="${src}" alt="${title || ''}"></div>`
+    return id
+  }
+
+  return { create, close, focus, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, windows, getState, closeByTitle, focusByTitle }
 })()
