@@ -133,18 +133,118 @@
     }, 1000)
 
     // --- Keyboard shortcuts ---
+    const spotlight = document.getElementById('spotlight')
+    const spotInput = document.getElementById('spotlight-input')
+    const spotResults = document.getElementById('spotlight-results')
+    let spotOpen = false
+    let spotSelected = -1
+
+    function openSpotlight() {
+      spotlight.classList.remove('hidden')
+      spotInput.value = ''
+      spotResults.innerHTML = ''
+      spotInput.focus()
+      spotOpen = true
+      spotSelected = -1
+    }
+
+    function closeSpotlight() {
+      spotlight.classList.add('hidden')
+      spotOpen = false
+    }
+
+    function searchSpotlight(query) {
+      spotResults.innerHTML = ''
+      spotSelected = -1
+      if (!query.trim()) return
+      const q = query.toLowerCase()
+      const items = []
+
+      // Search files
+      const files = VFS.find('/home/user', '')
+      files.forEach(f => {
+        const name = f.split('/').pop()
+        if (name.toLowerCase().includes(q)) {
+          items.push({ icon: VFS.isDir(f) ? '📁' : '📄', label: name, hint: f, action: () => {
+            if (VFS.isFile(f)) WindowManager.openEditor(f)
+            else WindowManager.openFinder(f)
+          }})
+        }
+      })
+
+      // Search installed apps
+      const apps = WindowManager.getInstalledApps()
+      apps.forEach(app => {
+        if (app.name.toLowerCase().includes(q)) {
+          items.push({ icon: app.icon, label: app.name, hint: 'App', action: () => WindowManager.openApp(app.name) })
+        }
+      })
+
+      // Built-in apps
+      const builtins = [
+        { icon: '📁', name: 'Finder', action: () => WindowManager.openFinder() },
+        { icon: '⬛', name: 'Terminal', action: () => WindowManager.openTerminal() },
+        { icon: '🌐', name: 'Browser', action: () => WindowManager.openBrowser('https://example.com') },
+        { icon: '⚙️', name: 'Settings', action: () => WindowManager.openSettings() },
+      ]
+      builtins.forEach(b => {
+        if (b.name.toLowerCase().includes(q)) {
+          items.push({ icon: b.icon, label: b.name, hint: 'System', action: b.action })
+        }
+      })
+
+      // Always add "Ask agent" option
+      items.push({ icon: '✨', label: `Ask: "${query}"`, hint: 'Chat with agent', action: () => Agent.chat(query) })
+
+      // Render (max 8)
+      items.slice(0, 8).forEach((item, i) => {
+        const el = document.createElement('div')
+        el.className = 'spotlight-item'
+        el.innerHTML = `<span class="spot-icon">${item.icon}</span><span class="spot-label">${item.label}</span><span class="spot-hint">${item.hint || ''}</span>`
+        el.addEventListener('click', () => { closeSpotlight(); item.action() })
+        spotResults.appendChild(el)
+      })
+    }
+
+    spotInput.addEventListener('input', () => searchSpotlight(spotInput.value))
+    spotInput.addEventListener('keydown', (e) => {
+      const items = spotResults.querySelectorAll('.spotlight-item')
+      if (e.key === 'Escape') { closeSpotlight(); return }
+      if (e.key === 'ArrowDown') { e.preventDefault(); spotSelected = Math.min(spotSelected + 1, items.length - 1) }
+      if (e.key === 'ArrowUp') { e.preventDefault(); spotSelected = Math.max(spotSelected - 1, 0) }
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        if (spotSelected >= 0 && items[spotSelected]) items[spotSelected].click()
+        else if (items.length > 0) items[0].click()
+        return
+      }
+      items.forEach((el, i) => el.classList.toggle('selected', i === spotSelected))
+    })
+
+    // Close spotlight on outside click
+    document.addEventListener('mousedown', (e) => {
+      if (spotOpen && !spotlight.contains(e.target)) closeSpotlight()
+    })
+
     document.addEventListener('keydown', (e) => {
+      // Cmd/Ctrl+Space → Spotlight
+      if ((e.metaKey || e.ctrlKey) && e.code === 'Space') {
+        e.preventDefault()
+        if (spotOpen) closeSpotlight()
+        else openSpotlight()
+        return
+      }
       // Cmd/Ctrl+K → focus chat input
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
         document.getElementById('chat-input')?.focus()
       }
-      // Escape → close focused window
-      if (e.key === 'Escape') {
-        const focused = WindowManager.getFocused?.()
+      // Escape → close spotlight first, then focused window
+      if (e.key === 'Escape' && !spotOpen) {
+        const focused = WindowManager.getFocused()
         if (focused) WindowManager.close(focused)
       }
-      // Cmd/Ctrl+N → new file dialog (tell agent)
+      // Cmd/Ctrl+N → new file
       if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
         e.preventDefault()
         Agent.chat('Create a new file on the Desktop')
