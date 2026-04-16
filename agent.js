@@ -17,6 +17,8 @@ const Agent = (() => {
     if (model) opts.model = model
     else opts.model = provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o'
     if (baseUrl) opts.baseUrl = baseUrl
+    // Use proxy.link2web.site to bypass CORS when running in browser
+    opts.proxyUrl = 'https://proxy.link2web.site'
     ai = new Agentic(opts)
   }
 
