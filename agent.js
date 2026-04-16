@@ -81,9 +81,12 @@ const Agent = (() => {
         tools: [],
         emit: (type, data) => {
           if (type === 'token') {
-            fullReply += (data.text || '')
-            bubble.textContent = fullReply
-            document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight
+            const text = typeof data === 'string' ? data : (data?.text || '')
+            if (text) {
+              fullReply += text
+              bubble.textContent = fullReply
+              document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight
+            }
           }
         }
       })
@@ -91,9 +94,13 @@ const Agent = (() => {
       // Fallback if streaming didn't populate
       if (!fullReply && result) {
         if (typeof result === 'string') fullReply = result
-        else if (result.answer) fullReply = result.answer
-        else if (result.content) fullReply = typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
-        else fullReply = String(result)
+        else if (typeof result?.answer === 'string') fullReply = result.answer
+        else if (typeof result?.content === 'string') fullReply = result.content
+        else {
+          // Last resort: try to find any string value
+          const str = result?.answer ?? result?.content ?? result?.text ?? ''
+          fullReply = typeof str === 'string' ? str : JSON.stringify(result)
+        }
         bubble.textContent = fullReply
       }
 
