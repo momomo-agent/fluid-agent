@@ -167,6 +167,7 @@ const WindowManager = (() => {
       case 'music': renderMusic(w, body); break
       case 'video': renderVideo(w, body); break
       case 'browser': renderBrowser(w, body); break
+      case 'app': renderApp(w, body); break
     }
   }
 
@@ -567,9 +568,28 @@ const WindowManager = (() => {
     const container = document.getElementById('dock-running')
     if (!container) return
     container.innerHTML = ''
+
+    // Show installed generative apps in dock
+    for (const [name, app] of installedApps) {
+      const item = document.createElement('div')
+      item.className = 'dock-item dock-app'
+      item.title = name
+      item.textContent = app.icon
+      // Check if already open
+      let isOpen = false
+      windows.forEach(w => { if (w.type === 'app' && w.data?.name === name) isOpen = true })
+      if (isOpen) {
+        const dot = document.createElement('div')
+        dot.className = 'dock-running-dot'
+        item.appendChild(dot)
+      }
+      item.addEventListener('click', () => openApp(name))
+      container.appendChild(item)
+    }
+
+    // Show other running windows
     windows.forEach((w, id) => {
-      // Skip pinned app types
-      if (['finder', 'terminal', 'settings', 'music', 'video', 'browser'].includes(w.type) && !w.minimized) return
+      if (['finder', 'terminal', 'settings', 'music', 'video', 'browser', 'app'].includes(w.type) && !w.minimized) return
       const item = document.createElement('div')
       item.className = 'dock-item' + (w.minimized ? ' minimized' : '')
       item.title = w.el.querySelector('.window-title')?.textContent || w.type
@@ -860,6 +880,45 @@ const WindowManager = (() => {
     }
   })
 
+  // --- Generative App ---
+  const installedApps = new Map() // name -> { html, css, js, icon, width, height }
+
+  function openApp(name, html, css, js, opts = {}) {
+    // Save to installed apps for re-opening
+    if (html) {
+      installedApps.set(name, { html, css: css || '', js: js || '', icon: opts.icon || '💻', width: opts.width || 420, height: opts.height || 360 })
+    }
+    const app = installedApps.get(name)
+    if (!app) return null
+    const id = create({ type: 'app', title: name, x: 150, y: 80, width: app.width, height: app.height, data: { name, html: app.html, css: app.css, js: app.js } })
+    updateDock()
+    return id
+  }
+
+  function renderApp(w, body) {
+    const { html, css, js } = w.data || {}
+    // Sandboxed iframe with generated content
+    const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; }
+button { cursor: pointer; }
+input, select, textarea { font-family: inherit; }
+${css}
+</style></head><body>${html}<script>${js}<\/script></body></html>`
+    const blob = new Blob([doc], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    body.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:none" sandbox="allow-scripts"></iframe>`
+    // Cleanup blob URL when window closes
+    const observer = new MutationObserver(() => {
+      if (!body.isConnected) { URL.revokeObjectURL(url); observer.disconnect() }
+    })
+    observer.observe(body.parentElement || document.body, { childList: true, subtree: true })
+  }
+
+  function getInstalledApps() {
+    return Array.from(installedApps.entries()).map(([name, app]) => ({ name, icon: app.icon }))
+  }
+
   // Update dock when windows change
   const origClose = close
   const _close = (id) => {
@@ -867,5 +926,5 @@ const WindowManager = (() => {
     origClose(id); updateDock()
   }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle }
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle }
 })()

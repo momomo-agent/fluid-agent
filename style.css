@@ -383,6 +383,9 @@ select.settings-input { appearance: none; cursor: pointer; }
 .browser-bookmark { font-size: 12px; color: var(--text); padding: 8px 14px; background: var(--surface-2); border-radius: 8px; cursor: pointer; transition: all 0.15s; }
 .browser-bookmark:hover { background: var(--surface-3); transform: translateY(-1px); }
 
+/* ── Dock App Items ── */
+.dock-app { position: relative; }
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   #app { flex-direction: column; }

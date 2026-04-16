@@ -49,12 +49,14 @@ const Agent = (() => {
   function getOsState() {
     const state = WindowManager.getState()
     const wins = state.windows.map(w => `${w.type}${w.path ? ':' + w.path : ''}${w.focused ? ' [focused]' : ''}`).join(', ') || 'none'
+    const apps = WindowManager.getInstalledApps()
     return {
       windows: wins,
       focused: state.focusedWindow ? `${state.focusedWindow.type}${state.focusedWindow.path ? ' (' + state.focusedWindow.path + ')' : ''}` : 'none',
       cwd: Shell.getCwd(),
       desktop: VFS.ls('/home/user/Desktop')?.map(f => f.name) || [],
       documents: VFS.ls('/home/user/Documents')?.map(f => f.name) || [],
+      installedApps: apps.length > 0 ? apps.map(a => `${a.icon} ${a.name}`).join(', ') : 'none',
     }
   }
 
@@ -135,8 +137,9 @@ You have deep control over every application:
 - Video: play YouTube or direct URLs, control playback
 - Terminal: execute commands and read output
 - Windows: open, close, focus, minimize any window
+- Generative Apps: create any app on the fly with HTML/CSS/JS — calculators, games, dashboards, anything
 
-You ARE the OS. When the user asks to "play music", "open a website", "show a video" — you do it directly with tools, not just talk about it.
+You ARE the OS. When the user asks to "play music", "open a website", "show a video", "make me a calculator" — you do it directly with tools, not just talk about it.
 
 Current OS state:
 - Open windows: ${os.windows}
@@ -144,6 +147,7 @@ Current OS state:
 - Working directory: ${os.cwd}
 - Desktop files: ${JSON.stringify(os.desktop)}
 - Documents: ${JSON.stringify(os.documents)}
+- Installed apps: ${os.installedApps}
 `
     if (runningTasks.length > 0) {
       sys += `\nCurrently executing: ${runningTasks[0].goal} (${runningTasks[0].status})`
@@ -262,6 +266,16 @@ For pure conversation, just reply normally. Keep replies concise.`
           return { success: true, output }
         })
       },
+      create_app: ({ name, html, css, js, icon, width, height }) => {
+        WindowManager.openApp(name, html, css, js, { icon, width, height })
+        showActivity(`💻 Created app: ${name}`)
+        return { success: true, message: `App "${name}" created and opened. It's now installed in the dock.` }
+      },
+      update_app: ({ name, html, css, js }) => {
+        WindowManager.openApp(name, html, css, js)
+        return { success: true, message: `App "${name}" updated.` }
+      },
+      list_apps: () => ({ apps: WindowManager.getInstalledApps() }),
       close_window: ({ title }) => { const ok = WindowManager.closeByTitle(title); return { success: ok } },
       focus_window: ({ title }) => { const ok = WindowManager.focusByTitle(title); return { success: ok } },
       list_windows: () => ({ windows: WindowManager.getState().windows }),
@@ -293,6 +307,9 @@ For pure conversation, just reply normally. Keep replies concise.`
       play_video: { desc: 'Open video player with a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'Video URL (YouTube embed, mp4, etc)' }, title: { type: 'string' } } } },
       video_control: { desc: 'Control video playback', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'fullscreen'] } }, required: ['action'] } },
       run_terminal: { desc: 'Execute a command in the terminal and return output. Use for any shell operation.', schema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
+      create_app: { desc: 'Create a generative app with HTML/CSS/JS. The app runs in a sandboxed window and gets installed in the dock. Use this to build any UI the user asks for — calculators, games, dashboards, tools, anything.', schema: { type: 'object', properties: { name: { type: 'string', description: 'App name shown in title bar and dock' }, html: { type: 'string', description: 'HTML body content' }, css: { type: 'string', description: 'CSS styles' }, js: { type: 'string', description: 'JavaScript code' }, icon: { type: 'string', description: 'Emoji icon for dock' }, width: { type: 'number' }, height: { type: 'number' } }, required: ['name', 'html'] } },
+      update_app: { desc: 'Update an existing app with new HTML/CSS/JS', schema: { type: 'object', properties: { name: { type: 'string' }, html: { type: 'string' }, css: { type: 'string' }, js: { type: 'string' } }, required: ['name', 'html'] } },
+      list_apps: { desc: 'List all installed generative apps', schema: { type: 'object', properties: {} } },
       focus_window: { desc: 'Focus/bring a window to front by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
       list_windows: { desc: 'List all open windows', schema: { type: 'object', properties: {} } },
       update_progress: { desc: 'Mark a step as done by index (0-based). Call this after completing each planned step.', schema: { type: 'object', properties: { step_index: { type: 'number', description: '0-based step index' } }, required: ['step_index'] } },
@@ -339,7 +356,8 @@ For pure conversation, just reply normally. Keep replies concise.`
 Current OS state:
 - Open windows: ${os.windows}
 - Working directory: ${os.cwd}
-- Desktop files: ${JSON.stringify(os.desktop)}${steerNote}
+- Desktop files: ${JSON.stringify(os.desktop)}
+- Installed apps: ${os.installedApps}${steerNote}
 
 Planned steps:
 ${steps.map((s, i) => `${i}. ${s.text}`).join('\n')}
@@ -352,8 +370,10 @@ You have deep control over every application:
 - Music: play_music (play/pause/next/prev, pick track by index)
 - Video: play_video (open with URL), video_control (play/pause/fullscreen)
 - Windows: open_finder, open_image, close_window, focus_window, list_windows
+- Generative Apps: create_app (build any UI with HTML/CSS/JS), update_app, list_apps
+  Apps get installed in the dock and can be re-opened. Build anything: calculators, games, dashboards, tools.
 
-You ARE the OS. Don't just open apps — use them. Navigate the browser, play specific music, run commands and read their output.
+You ARE the OS. Don't just open apps — use them. Create new apps when the user needs custom UI.
 
 IMPORTANT: After completing each planned step, call update_progress with the step_index.
 When finished, call the done tool with a summary.`,
