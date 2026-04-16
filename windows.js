@@ -165,6 +165,8 @@ const WindowManager = (() => {
       case 'plan': renderPlan(w, body); break
       case 'settings': renderSettings(w, body); break
       case 'music': renderMusic(w, body); break
+      case 'video': renderVideo(w, body); break
+      case 'browser': renderBrowser(w, body); break
     }
   }
 
@@ -567,11 +569,11 @@ const WindowManager = (() => {
     container.innerHTML = ''
     windows.forEach((w, id) => {
       // Skip pinned app types
-      if (['finder', 'terminal', 'settings'].includes(w.type) && !w.minimized) return
+      if (['finder', 'terminal', 'settings', 'music', 'video', 'browser'].includes(w.type) && !w.minimized) return
       const item = document.createElement('div')
       item.className = 'dock-item' + (w.minimized ? ' minimized' : '')
       item.title = w.el.querySelector('.window-title')?.textContent || w.type
-      const icons = { editor: '📝', taskmanager: '📋', plan: '📌', image: '🖼️', finder: '📁', terminal: '⬛', settings: '⚙️' }
+      const icons = { editor: '📝', taskmanager: '📋', plan: '📌', image: '🖼️', finder: '📁', terminal: '⬛', settings: '⚙️', music: '🎵', video: '🎬', browser: '🌐' }
       item.textContent = icons[w.type] || '🗔'
       if (!w.minimized) {
         const dot = document.createElement('div')
@@ -725,6 +727,103 @@ const WindowManager = (() => {
     musicRerender()
   })
 
+  // --- Video Player ---
+  function openVideo(url, title) {
+    const id = create({ type: 'video', title: title || 'Video Player', x: 180, y: 80, width: 560, height: 400, data: { url: url || '' } })
+    return id
+  }
+
+  function renderVideo(w, body) {
+    const url = w.data?.url || ''
+    if (url) {
+      // Detect YouTube and embed
+      const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]+)/)
+      if (ytMatch) {
+        body.innerHTML = `<div class="video-player"><iframe src="https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen style="width:100%;height:100%;border:none"></iframe></div>`
+      } else {
+        body.innerHTML = `<div class="video-player"><video src="${url}" controls autoplay style="width:100%;height:100%;object-fit:contain"></video></div>`
+      }
+    } else {
+      // Empty state with URL input
+      body.innerHTML = `<div class="video-empty">
+        <div class="video-empty-icon">🎬</div>
+        <div class="video-empty-text">Drop a video URL to play</div>
+        <div class="video-url-bar">
+          <input class="video-url-input" placeholder="Paste video URL..." />
+          <button class="video-url-go">▶</button>
+        </div>
+        <div class="video-samples">
+          <div class="video-sample" data-url="https://www.youtube.com/embed/dQw4w9WgXcQ">Sample: Rick Astley</div>
+          <div class="video-sample" data-url="https://www.youtube.com/embed/jNQXAC9IVRw">Sample: First YouTube Video</div>
+        </div>
+      </div>`
+      const input = body.querySelector('.video-url-input')
+      const go = () => {
+        const v = input.value.trim()
+        if (v) { w.data = { ...w.data, url: v }; renderVideo(w, body) }
+      }
+      body.querySelector('.video-url-go').addEventListener('click', go)
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') go() })
+      body.querySelectorAll('.video-sample').forEach(el => {
+        el.addEventListener('click', () => { w.data = { ...w.data, url: el.dataset.url }; renderVideo(w, body) })
+      })
+    }
+  }
+
+  // --- Browser ---
+  function openBrowser(url) {
+    const id = create({ type: 'browser', title: 'Browser', x: 160, y: 60, width: 640, height: 460, data: { url: url || '' } })
+    return id
+  }
+
+  function renderBrowser(w, body) {
+    const url = w.data?.url || ''
+    const displayUrl = url || 'about:blank'
+
+    body.innerHTML = `<div class="browser-window">
+      <div class="browser-toolbar">
+        <button class="browser-nav-btn" id="browser-back">◀</button>
+        <button class="browser-nav-btn" id="browser-fwd">▶</button>
+        <button class="browser-nav-btn" id="browser-reload">↻</button>
+        <div class="browser-url-bar">
+          <input class="browser-url-input" value="${displayUrl}" />
+        </div>
+      </div>
+      <div class="browser-content">${url
+        ? `<iframe src="${url}" style="width:100%;height:100%;border:none" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>`
+        : `<div class="browser-home">
+            <div class="browser-home-logo">🌐</div>
+            <div class="browser-home-title">FluidOS Browser</div>
+            <div class="browser-bookmarks">
+              <div class="browser-bookmark" data-url="https://en.wikipedia.org">Wikipedia</div>
+              <div class="browser-bookmark" data-url="https://news.ycombinator.com">Hacker News</div>
+              <div class="browser-bookmark" data-url="https://github.com">GitHub</div>
+              <div class="browser-bookmark" data-url="https://developer.mozilla.org">MDN</div>
+            </div>
+          </div>`
+      }</div>
+    </div>`
+
+    const urlInput = body.querySelector('.browser-url-input')
+    const navigate = (newUrl) => {
+      let u = newUrl.trim()
+      if (u && !u.match(/^https?:\/\//)) u = 'https://' + u
+      w.data = { ...w.data, url: u }
+      w.el.querySelector('.window-title').textContent = u ? new URL(u).hostname : 'Browser'
+      renderBrowser(w, body)
+    }
+    urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') navigate(urlInput.value) })
+    body.querySelector('#browser-reload')?.addEventListener('click', () => {
+      if (w.data?.url) renderBrowser(w, body)
+    })
+    body.querySelector('#browser-back')?.addEventListener('click', () => {
+      w.data = { ...w.data, url: '' }; renderBrowser(w, body)
+    })
+    body.querySelectorAll('.browser-bookmark').forEach(el => {
+      el.addEventListener('click', () => navigate(el.dataset.url))
+    })
+  }
+
   // Update dock when windows change
   const origClose = close
   const _close = (id) => {
@@ -732,5 +831,5 @@ const WindowManager = (() => {
     origClose(id); updateDock()
   }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle }
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle }
 })()

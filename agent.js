@@ -229,6 +229,8 @@ For pure conversation, just reply normally. Keep replies concise.`
         showActivity(`🎵 Music: ${action}${track != null ? ' #' + track : ''}`)
         return { success: true }
       },
+      open_browser: ({ url }) => { WindowManager.openBrowser(url); showActivity(`🌐 Browser: ${url || 'home'}`); return { success: true } },
+      play_video: ({ url, title }) => { WindowManager.openVideo(url, title); showActivity(`🎬 Video: ${title || url || 'player'}`); return { success: true } },
       close_window: ({ title }) => { const ok = WindowManager.closeByTitle(title); return { success: ok } },
       focus_window: ({ title }) => { const ok = WindowManager.focusByTitle(title); return { success: ok } },
       list_windows: () => ({ windows: WindowManager.getState().windows }),
@@ -254,6 +256,8 @@ For pure conversation, just reply normally. Keep replies concise.`
       close_window: { desc: 'Close a window by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
       open_image: { desc: 'Open and display an image by URL or path', schema: { type: 'object', properties: { src: { type: 'string', description: 'Image URL or path' }, title: { type: 'string' } }, required: ['src'] } },
       play_music: { desc: 'Control the music player. Actions: play, pause, next, prev, open', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'open'] }, track: { type: 'number', description: '0-based track index to play' } }, required: ['action'] } },
+      open_browser: { desc: 'Open a web browser window, optionally navigating to a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'URL to navigate to' } } } },
+      play_video: { desc: 'Open video player with a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'Video URL (YouTube embed, mp4, etc)' }, title: { type: 'string' } } } },
       focus_window: { desc: 'Focus/bring a window to front by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
       list_windows: { desc: 'List all open windows', schema: { type: 'object', properties: {} } },
       update_progress: { desc: 'Mark a step as done by index (0-based). Call this after completing each planned step.', schema: { type: 'object', properties: { step_index: { type: 'number', description: '0-based step index' } }, required: ['step_index'] } },
