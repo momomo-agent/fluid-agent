@@ -248,6 +248,18 @@ const WindowManager = (() => {
             } else {
               appendOutput(output, 'Voice not enabled. Configure ElevenLabs in Settings.', 'error')
             }
+          } else if (cmd.trim().match(/^play(\s+\d+)?$/i)) {
+            const m = cmd.trim().match(/^play(?:\s+(\d+))?$/i)
+            const idx = m[1] != null ? parseInt(m[1]) : null
+            WindowManager.openMusic()
+            window.dispatchEvent(new CustomEvent('music-control', { detail: { action: 'play', track: idx } }))
+            appendOutput(output, idx != null ? `Playing track ${idx}` : 'Playing music', 'output')
+          } else if (cmd.trim() === 'pause' || cmd.trim() === 'stop') {
+            window.dispatchEvent(new CustomEvent('music-control', { detail: { action: 'pause' } }))
+            appendOutput(output, 'Music paused', 'output')
+          } else if (cmd.trim() === 'next') {
+            window.dispatchEvent(new CustomEvent('music-control', { detail: { action: 'next' } }))
+            appendOutput(output, 'Next track', 'output')
           } else {
             const result = await Shell.execAsync(cmd)
             if (result === '\x1bclear') {
@@ -578,16 +590,50 @@ const WindowManager = (() => {
   let musicId = null
   const musicState = {
     playlist: [
-      { title: 'Midnight Drive', artist: 'Synthwave FM', duration: 234, color: '#60a5fa' },
-      { title: 'Neon Lights', artist: 'Retro Wave', duration: 198, color: '#a78bfa' },
-      { title: 'Ocean Breeze', artist: 'Lo-Fi Beats', duration: 267, color: '#34d399' },
-      { title: 'City Rain', artist: 'Ambient Works', duration: 312, color: '#f472b6' },
-      { title: 'Starlight', artist: 'Chillhop', duration: 185, color: '#fbbf24' },
+      { title: 'Midnight Drive', artist: 'Synthwave FM', color: '#60a5fa' },
+      { title: 'Neon Lights', artist: 'Retro Wave', color: '#a78bfa' },
+      { title: 'Ocean Breeze', artist: 'Lo-Fi Beats', color: '#34d399' },
+      { title: 'City Rain', artist: 'Ambient Works', color: '#f472b6' },
+      { title: 'Starlight', artist: 'Chillhop', color: '#fbbf24' },
     ],
     current: 0,
     playing: false,
     elapsed: 0,
     timer: null,
+  }
+  // Set durations from synth
+  musicState.playlist.forEach((t, i) => { t.duration = Math.floor(AudioSynth.getDuration(i)) })
+
+  function musicPlay(s) {
+    clearInterval(s.timer)
+    s.playing = true
+    AudioSynth.play(s.current, s.elapsed, () => {
+      // Auto-next
+      s.current = (s.current + 1) % s.playlist.length
+      s.elapsed = 0
+      musicPlay(s)
+      musicRerender()
+    })
+    s.timer = setInterval(() => {
+      s.elapsed += 1
+      if (s.elapsed >= s.playlist[s.current].duration) {
+        s.current = (s.current + 1) % s.playlist.length
+        s.elapsed = 0
+      }
+      musicRerender()
+    }, 1000)
+  }
+
+  function musicPause(s) {
+    clearInterval(s.timer)
+    s.playing = false
+    AudioSynth.stop()
+  }
+
+  function musicRerender() {
+    if (!musicId || !windows.has(musicId)) return
+    const w = windows.get(musicId)
+    renderMusic(w, w.el.querySelector('.window-body'))
   }
 
   function openMusic() {
@@ -630,38 +676,28 @@ const WindowManager = (() => {
     </div>`
 
     body.querySelector('#music-toggle').addEventListener('click', () => {
-      s.playing = !s.playing
-      if (s.playing) {
-        s.timer = setInterval(() => {
-          s.elapsed += 1
-          if (s.elapsed >= s.playlist[s.current].duration) {
-            s.current = (s.current + 1) % s.playlist.length
-            s.elapsed = 0
-          }
-          if (musicId && windows.has(musicId)) renderMusic(windows.get(musicId), body)
-        }, 1000)
-      } else {
-        clearInterval(s.timer)
-      }
+      if (s.playing) musicPause(s)
+      else musicPlay(s)
       renderMusic(w, body)
     })
     body.querySelector('#music-prev').addEventListener('click', () => {
-      clearInterval(s.timer); s.playing = false
+      musicPause(s)
       s.current = (s.current - 1 + s.playlist.length) % s.playlist.length
       s.elapsed = 0
       renderMusic(w, body)
     })
     body.querySelector('#music-next').addEventListener('click', () => {
-      clearInterval(s.timer); s.playing = false
+      musicPause(s)
       s.current = (s.current + 1) % s.playlist.length
       s.elapsed = 0
       renderMusic(w, body)
     })
     body.querySelectorAll('.music-track').forEach(el => {
       el.addEventListener('click', () => {
-        clearInterval(s.timer); s.playing = false
+        musicPause(s)
         s.current = parseInt(el.dataset.idx)
         s.elapsed = 0
+        musicPlay(s)
         renderMusic(w, body)
       })
     })
@@ -672,36 +708,27 @@ const WindowManager = (() => {
     const { action, track } = e.detail
     const s = musicState
     if (track != null && track >= 0 && track < s.playlist.length) {
-      clearInterval(s.timer); s.playing = false
+      musicPause(s)
       s.current = track; s.elapsed = 0
     }
     if (action === 'play' || action === 'open') {
-      if (!s.playing) {
-        s.playing = true
-        s.timer = setInterval(() => {
-          s.elapsed += 1
-          if (s.elapsed >= s.playlist[s.current].duration) {
-            s.current = (s.current + 1) % s.playlist.length; s.elapsed = 0
-          }
-          if (musicId && windows.has(musicId)) renderMusic(windows.get(musicId), windows.get(musicId).el.querySelector('.window-body'))
-        }, 1000)
-      }
+      if (!s.playing) musicPlay(s)
     } else if (action === 'pause') {
-      clearInterval(s.timer); s.playing = false
+      musicPause(s)
     } else if (action === 'next') {
-      clearInterval(s.timer); s.playing = false
+      musicPause(s)
       s.current = (s.current + 1) % s.playlist.length; s.elapsed = 0
     } else if (action === 'prev') {
-      clearInterval(s.timer); s.playing = false
+      musicPause(s)
       s.current = (s.current - 1 + s.playlist.length) % s.playlist.length; s.elapsed = 0
     }
-    if (musicId && windows.has(musicId)) renderMusic(windows.get(musicId), windows.get(musicId).el.querySelector('.window-body'))
+    musicRerender()
   })
 
   // Update dock when windows change
   const origClose = close
   const _close = (id) => {
-    if (id === musicId) { clearInterval(musicState.timer); musicState.playing = false; musicId = null }
+    if (id === musicId) { musicPause(musicState); musicId = null }
     origClose(id); updateDock()
   }
 
