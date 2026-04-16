@@ -47,6 +47,9 @@
     Agent.configure(provider, apiKey, model, baseUrl)
     document.getElementById('app').style.display = 'flex'
 
+    // Start proactive awareness loop
+    Agent.startProactiveLoop()
+
     // Open initial Finder window
     WindowManager.openFinder('/home/user/Desktop')
 

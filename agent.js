@@ -1,4 +1,4 @@
-/* agent.js — Dual-brain agent: Talker + Worker, powered by Agentic */
+/* agent.js - Dual-brain agent: Talker + Worker, powered by Agentic */
 const Agent = (() => {
   let ai = null
   const messages = []
@@ -137,9 +137,9 @@ You have deep control over every application:
 - Video: play YouTube or direct URLs, control playback
 - Terminal: execute commands and read output
 - Windows: open, close, focus, minimize any window
-- Generative Apps: create any app on the fly with HTML/CSS/JS — calculators, games, dashboards, anything
+- Generative Apps: create any app on the fly with HTML/CSS/JS - calculators, games, dashboards, anything
 
-You ARE the OS. When the user asks to "play music", "open a website", "show a video", "make me a calculator" — you do it directly with tools, not just talk about it.
+You ARE the OS. When the user asks to "play music", "open a website", "show a video", "make me a calculator" - you do it directly with tools, not just talk about it.
 
 Current OS state:
 - Open windows: ${os.windows}
@@ -157,17 +157,17 @@ Current OS state:
 
     sys += `\n\nYou can respond with these JSON action blocks:
 
-1. NEW TASK — queue a new task (runs after current finishes):
+1. NEW TASK - queue a new task (runs after current finishes):
 \`\`\`json
 {"action": "execute", "reply": "your reply", "task": "what to do", "steps": ["step 1", "step 2"]}
 \`\`\`
 
-2. STEER — change direction of the currently running task:
+2. STEER - change direction of the currently running task:
 \`\`\`json
 {"action": "steer", "reply": "your reply", "instruction": "new direction for the worker"}
 \`\`\`
 
-3. ABORT — stop everything (current task + queue):
+3. ABORT - stop everything (current task + queue):
 \`\`\`json
 {"action": "abort", "reply": "your reply"}
 \`\`\`
@@ -185,7 +185,7 @@ For pure conversation, just reply normally. Keep replies concise.`
   function enqueueTask(taskDescription, steps) {
     taskQueue.push({ taskDescription, steps })
     if (!workerRunning) drainQueue()
-    else showActivity(`Queued: ${taskDescription.slice(0, 40)}…`)
+    else showActivity(`Queued: ${taskDescription.slice(0, 40)}...`)
   }
 
   async function drainQueue() {
@@ -237,7 +237,7 @@ For pure conversation, just reply normally. Keep replies concise.`
       open_image: ({ src, title }) => { WindowManager.openImage(src, title); showActivity(`Opened image: ${title || src.split('/').pop()}`); return { success: true } },
       play_music: ({ action, track }) => {
         WindowManager.openMusic()
-        // Expose musicState for agent control — handled via custom event
+        // Expose musicState for agent control - handled via custom event
         const evt = new CustomEvent('music-control', { detail: { action, track } })
         window.dispatchEvent(evt)
         showActivity(`🎵 Music: ${action}${track != null ? ' #' + track : ''}`)
@@ -307,7 +307,7 @@ For pure conversation, just reply normally. Keep replies concise.`
       play_video: { desc: 'Open video player with a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'Video URL (YouTube embed, mp4, etc)' }, title: { type: 'string' } } } },
       video_control: { desc: 'Control video playback', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'fullscreen'] } }, required: ['action'] } },
       run_terminal: { desc: 'Execute a command in the terminal and return output. Use for any shell operation.', schema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
-      create_app: { desc: 'Create a generative app with HTML/CSS/JS. The app runs in a sandboxed window and gets installed in the dock. Use this to build any UI the user asks for — calculators, games, dashboards, tools, anything.', schema: { type: 'object', properties: { name: { type: 'string', description: 'App name shown in title bar and dock' }, html: { type: 'string', description: 'HTML body content' }, css: { type: 'string', description: 'CSS styles' }, js: { type: 'string', description: 'JavaScript code' }, icon: { type: 'string', description: 'Emoji icon for dock' }, width: { type: 'number' }, height: { type: 'number' } }, required: ['name', 'html'] } },
+      create_app: { desc: 'Create a generative app with HTML/CSS/JS. The app runs in a sandboxed window and gets installed in the dock. Use this to build any UI the user asks for - calculators, games, dashboards, tools, anything.', schema: { type: 'object', properties: { name: { type: 'string', description: 'App name shown in title bar and dock' }, html: { type: 'string', description: 'HTML body content' }, css: { type: 'string', description: 'CSS styles' }, js: { type: 'string', description: 'JavaScript code' }, icon: { type: 'string', description: 'Emoji icon for dock' }, width: { type: 'number' }, height: { type: 'number' } }, required: ['name', 'html'] } },
       update_app: { desc: 'Update an existing app with new HTML/CSS/JS', schema: { type: 'object', properties: { name: { type: 'string' }, html: { type: 'string' }, css: { type: 'string' }, js: { type: 'string' } }, required: ['name', 'html'] } },
       list_apps: { desc: 'List all installed generative apps', schema: { type: 'object', properties: {} } },
       focus_window: { desc: 'Focus/bring a window to front by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
@@ -341,6 +341,7 @@ For pure conversation, just reply normally. Keep replies concise.`
           setWorkerStatus(taskQueue.length > 0 ? `⏳ ${taskQueue.length} queued` : '✅ Done')
           steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
           WindowManager.updateTask(task)
+          onTaskComplete(taskDescription)
         }
         return result
       }
@@ -373,7 +374,7 @@ You have deep control over every application:
 - Generative Apps: create_app (build any UI with HTML/CSS/JS), update_app, list_apps
   Apps get installed in the dock and can be re-opened. Build anything: calculators, games, dashboards, tools.
 
-You ARE the OS. Don't just open apps — use them. Create new apps when the user needs custom UI.
+You ARE the OS. Don't just open apps - use them. Create new apps when the user needs custom UI.
 
 IMPORTANT: After completing each planned step, call update_progress with the step_index.
 When finished, call the done tool with a summary.`,
@@ -410,5 +411,105 @@ When finished, call the done tool with a summary.`,
     workerAbort = null
   }
 
-  return { configure, chat, blackboard, showActivity }
-})()
+  // --- Proactive Agent Loop ---
+  let proactiveTimer = null
+  let lastUserMessage = Date.now()
+  let lastProactive = 0
+  let proactiveEnabled = true
+  const notifications = [] // { text, time, type }
+
+  function notify(text, type = 'info') {
+    notifications.push({ text, time: Date.now(), type })
+    // Show as system bubble
+    addBubble('agent', text)
+    // Also show in activity stream
+    showActivity(`💡 ${text.slice(0, 50)}`)
+    // Voice if enabled
+    if (Voice?.isEnabled()) Voice.speak(text)
+  }
+
+  function startProactiveLoop() {
+    if (proactiveTimer) return
+    proactiveTimer = setInterval(async () => {
+      if (!ai || !proactiveEnabled) return
+      // Don't interrupt if user just spoke (wait 30s)
+      if (Date.now() - lastUserMessage < 30000) return
+      // Don't be too chatty (min 60s between proactive messages)
+      if (Date.now() - lastProactive < 60000) return
+      // Don't interrupt active work
+      if (workerRunning) {
+        // But DO notify on task completion
+        return
+      }
+
+      try {
+        const os = getOsState()
+        const recentChat = messages.slice(-4).map(m => `${m.role}: ${m.content?.slice(0, 100)}`).join('\n')
+        const resp = await ai.chat(
+          'Check if you should proactively message the user. Consider: task completions, suggestions based on what they were doing, interesting observations, or just a friendly check-in if it\'s been quiet.',
+          {
+            system: `You are Fluid Agent OS's proactive awareness system.
+
+Current state:
+- Windows: ${os.windows}
+- Installed apps: ${os.installedApps}
+- Time since last user message: ${Math.round((Date.now() - lastUserMessage) / 1000)}s
+- Recent conversation:\n${recentChat}
+
+Decide if you should say something. Reasons to speak:
+- A task just finished and user should know
+- You notice something useful based on context
+- It's been quiet and you have a suggestion
+- Something in the OS state is noteworthy
+
+Respond with JSON:
+{"speak": true, "message": "what to say"}
+or
+{"speak": false}
+
+Be selective. Don't speak just to speak. Quality > frequency.`,
+            stream: false,
+          }
+        )
+
+        try {
+          const text = resp?.content || resp?.text || (typeof resp === 'string' ? resp : '')
+          const jsonMatch = text.match(/\{[\s\S]*?\}/)
+          if (jsonMatch) {
+            const decision = JSON.parse(jsonMatch[0])
+            if (decision.speak && decision.message) {
+              lastProactive = Date.now()
+              notify(decision.message)
+              messages.push({ role: 'assistant', content: decision.message })
+            }
+          }
+        } catch (e) { /* parse error, skip */ }
+      } catch (e) {
+        console.warn('[Proactive]', e)
+      }
+    }, 30000) // Check every 30s
+  }
+
+  function stopProactiveLoop() {
+    if (proactiveTimer) { clearInterval(proactiveTimer); proactiveTimer = null }
+  }
+
+  // Track user activity
+  const origChat = chat
+  async function chatWithTracking(msg) {
+    lastUserMessage = Date.now()
+    return origChat(msg)
+  }
+
+  // Worker completion notification
+  const origDrainQueue = drainQueue
+  // Patch: notify on task completion
+  function onTaskComplete(taskDesc) {
+    if (Date.now() - lastUserMessage > 15000) {
+      // User hasn't spoken in 15s, proactively notify
+      notify(`Done: ${taskDesc}`)
+    }
+  }
+
+  return { configure, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, onTaskComplete }
+})() 
