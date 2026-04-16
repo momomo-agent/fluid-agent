@@ -894,20 +894,20 @@ const WindowManager = (() => {
   })
 
   // --- Generative App ---
-  const installedApps = new Map() // name -> { html, css, js, icon, width, height }
-  let _store = null
+  const installedApps = new Map()
+  let _ai = null
 
-  // Persist apps via agentic-store
+  // Persist apps via agentic glue
   async function saveApps() {
-    if (!_store) return
+    if (!_ai) return
     const obj = {}
     for (const [k, v] of installedApps) obj[k] = v
-    await _store.set('apps', obj)
+    await _ai.save('apps', obj)
   }
-  async function loadApps(store) {
-    _store = store
-    if (!store) return
-    const saved = await store.get('apps')
+  async function loadApps(ai) {
+    _ai = ai
+    if (!ai) return
+    const saved = await ai.load('apps')
     if (saved) {
       for (const [k, v] of Object.entries(saved)) installedApps.set(k, v)
     }

@@ -5,7 +5,6 @@ const VFS = (() => {
 
   const root = makeDir('/')
   const listeners = []
-  let store = null
 
   function on(fn) { listeners.push(fn) }
   function emit(event, path) { listeners.forEach(fn => fn(event, path)) }
@@ -153,14 +152,16 @@ const VFS = (() => {
   }
 
   let saveTimer = null
+  let _ai = null  // Agentic instance for persistence
+
   async function save() {
-    if (!store) return
-    await store.set('vfs', serialize())
+    if (!_ai) return
+    await _ai.save('vfs', serialize())
   }
 
   async function load() {
-    if (!store) return false
-    const data = await store.get('vfs')
+    if (!_ai) return false
+    const data = await _ai.load('vfs')
     if (data) return deserialize(data)
     return false
   }
@@ -168,9 +169,9 @@ const VFS = (() => {
   // Auto-save on changes (debounced 1s)
   on(() => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 1000) })
 
-  // Init: connect to store, restore or create defaults
-  async function init() {
-    store = await AgenticStore.createStore('fluid-agent')
+  // Init: connect to agentic, restore or create defaults
+  async function init(ai) {
+    _ai = ai
     const restored = await load()
     if (!restored) {
       mkdir('/home/user/Desktop')
@@ -183,7 +184,6 @@ const VFS = (() => {
       writeFile('/home/user/Desktop/notes.md', '# Notes\n\n- Fluid Agent is an AI-native OS\n- The AI doesn\'t just run apps \u2014 it IS the OS\n- Windows are the agent\'s expressions\n')
       writeFile('/home/user/Documents/ideas.txt', 'Project Ideas:\n\n1. A weather dashboard\n2. A markdown previewer\n3. A simple game\n')
     }
-    return store
   }
 
   return { resolve, mkdir, writeFile, readFile, ls, exists, isDir, isFile, rm, cp, mv, find, grep, normPath, on, save, load, init }

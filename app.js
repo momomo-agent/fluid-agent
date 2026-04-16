@@ -45,9 +45,11 @@
 
   async function boot(provider, apiKey, model, baseUrl) {
     // Init agentic-store — single store for the whole OS
-    const store = await VFS.init()
-    await WindowManager.loadApps(store)
-    Agent.configure(provider, apiKey, model, baseUrl, store)
+    Agent.configure(provider, apiKey, model, baseUrl)
+    // ai instance is now ready — init persistence through the glue layer
+    const ai = Agent.getAi()
+    await VFS.init(ai)
+    await WindowManager.loadApps(ai)
     document.getElementById('app').style.display = 'flex'
 
     // Start proactive awareness loop
@@ -403,8 +405,8 @@
     let unreadCount = 0
 
     // Load persisted notifications via store
-    store.get('notifs').then(saved => { if (saved) { notifItems = saved; renderNotifs() } })
-    function saveNotifs() { store.set('notifs', notifItems) }
+    ai.load('notifs').then(saved => { if (saved) { notifItems = saved; renderNotifs() } })
+    function saveNotifs() { ai.save('notifs', notifItems) }
 
     function renderNotifs() {
       notifList.innerHTML = ''
@@ -439,7 +441,7 @@
 
     notifClear.addEventListener('click', () => {
       notifItems = []; unreadCount = 0
-      store.delete('notifs')
+      ai.deleteKey('notifs')
       renderNotifs()
     })
 

@@ -1,21 +1,20 @@
 /* agent.js - Dual-brain agent: Talker + Worker, powered by Agentic */
 const Agent = (() => {
   let ai = null
-  let store = null
   const messages = []
   let workerRunning = false
   let workerAbort = null
   const taskQueue = []
 
-  // --- Chat persistence via agentic-store ---
+  // --- Chat persistence via agentic glue ---
   async function saveChat() {
-    if (!store) return
-    await store.set('chat', messages.slice(-50))
+    if (!ai) return
+    await ai.save('chat', messages.slice(-50))
   }
 
   async function loadChat() {
-    if (!store) return []
-    const saved = await store.get('chat')
+    if (!ai) return []
+    const saved = await ai.load('chat')
     if (saved && Array.isArray(saved)) {
       messages.push(...saved)
       return saved
@@ -41,12 +40,11 @@ const Agent = (() => {
 
   const blackboard = { currentTask: null, directive: null, completedSteps: [], workerLog: [] }
 
-  function configure(provider, apiKey, model, baseUrl, _store) {
-    const opts = { provider, apiKey, proxyUrl: 'https://proxy.link2web.site' }
+  function configure(provider, apiKey, model, baseUrl) {
+    const opts = { provider, apiKey, proxyUrl: 'https://proxy.link2web.site', store: { name: 'fluid-agent' } }
     opts.model = model || (provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o')
     if (baseUrl) opts.baseUrl = baseUrl
     ai = new Agentic(opts)
-    if (_store) store = _store
   }
 
   function showActivity(text) {
@@ -585,5 +583,5 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
     setTimeout(() => setWorkerStatus(''), 3000)
   }
 
-  return { configure, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI }
+  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI }
 })() 
