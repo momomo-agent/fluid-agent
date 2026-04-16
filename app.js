@@ -33,8 +33,12 @@
     // Start proactive awareness loop (only if configured)
     if (hasKey) Agent.startProactiveLoop()
 
-    // Open initial windows
-    WindowManager.openFinder('/home/user/Desktop')
+    // Restore previous session or open defaults
+    let restored = false
+    if (ai) restored = await WindowManager.restoreSession(ai)
+    if (!restored) {
+      WindowManager.openFinder('/home/user/Desktop')
+    }
 
     // No API key? Open Settings so user can configure
     if (!hasKey) {

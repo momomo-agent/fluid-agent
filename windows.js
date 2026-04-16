@@ -105,6 +105,7 @@ const WindowManager = (() => {
     renderWindow(winObj)
     focus(id)
     updateDock()
+    saveSession()
     return id
   }
 
@@ -957,8 +958,68 @@ ${css}
   const origClose = close
   const _close = (id) => {
     if (id === musicId) { musicPause(musicState); musicId = null }
-    origClose(id); updateDock()
+    origClose(id); updateDock(); saveSession()
   }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
+  // ── Session persistence ──
+  let _sessionAi = null
+  let _sessionTimer = null
+
+  function saveSession() {
+    if (!_sessionAi) return
+    clearTimeout(_sessionTimer)
+    _sessionTimer = setTimeout(() => {
+      const snapshot = []
+      for (const [id, w] of windows) {
+        const el = w.el
+        if (el.classList.contains('closing')) continue
+        snapshot.push({
+          type: w.type,
+          title: el.querySelector('.window-title')?.textContent || w.type,
+          x: parseInt(el.style.left) || 0,
+          y: parseInt(el.style.top) || 0,
+          width: parseInt(el.style.width) || 500,
+          height: parseInt(el.style.height) || 350,
+          focused: el.classList.contains('focused'),
+          minimized: el.classList.contains('minimized'),
+          data: w.data || {},
+        })
+      }
+      _sessionAi.save('session', snapshot)
+    }, 500)
+  }
+
+  async function restoreSession(ai) {
+    _sessionAi = ai
+    if (!ai) return false
+    const snapshot = await ai.load('session')
+    if (!snapshot || !Array.isArray(snapshot) || snapshot.length === 0) return false
+
+    let focusId = null
+    for (const win of snapshot) {
+      let id = null
+      try {
+        switch (win.type) {
+          case 'finder': id = create({ type: 'finder', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
+          case 'terminal': id = create({ type: 'terminal', title: 'Terminal', x: win.x, y: win.y, width: win.width, height: win.height }); break
+          case 'editor': if (win.data?.path && VFS.isFile(win.data.path)) id = create({ type: 'editor', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
+          case 'settings': id = create({ type: 'settings', title: 'Settings', x: win.x, y: win.y, width: win.width, height: win.height }); settingsId = id; break
+          case 'browser': id = create({ type: 'browser', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
+          case 'music': id = create({ type: 'music', title: 'Music', x: win.x, y: win.y, width: win.width, height: win.height }); musicId = id; break
+          case 'app': if (win.data?.name && installedApps.has(win.data.name)) id = create({ type: 'app', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
+          // Skip transient types: plan, taskmanager, video, image
+        }
+      } catch (e) { /* skip broken windows */ }
+      if (id && win.minimized) minimize(id)
+      if (id && win.focused) focusId = id
+    }
+    if (focusId) focus(focusId)
+    updateDock()
+    return true
+  }
+
+  // Hook into drag/resize end to save session
+  document.addEventListener('mouseup', () => { if (_sessionAi) saveSession() })
+
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()
