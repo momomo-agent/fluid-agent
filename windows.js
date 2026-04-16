@@ -300,5 +300,37 @@ const WindowManager = (() => {
     })
   })
 
-  return { create, close, focus, openFinder, openTerminal, openEditor, openPlan, updatePlan, windows }
+  function getState() {
+    const focused = [...windows.values()].find(w => w.el.classList.contains('focused'))
+    return {
+      windows: [...windows.values()].map(w => ({
+        id: w.id,
+        type: w.type,
+        title: w.el.querySelector('.window-title')?.textContent || w.type,
+        focused: w.el.classList.contains('focused'),
+        path: w.data?.path || null,
+      })),
+      focusedWindow: focused ? { type: focused.type, title: focused.el.querySelector('.window-title')?.textContent, path: focused.data?.path } : null,
+    }
+  }
+
+  function closeByTitle(title) {
+    for (const [id, w] of windows) {
+      if (w.el.querySelector('.window-title')?.textContent === title || w.type === title) {
+        close(id); return true
+      }
+    }
+    return false
+  }
+
+  function focusByTitle(title) {
+    for (const [id, w] of windows) {
+      if (w.el.querySelector('.window-title')?.textContent === title || w.type === title) {
+        focus(id); return true
+      }
+    }
+    return false
+  }
+
+  return { create, close, focus, openFinder, openTerminal, openEditor, openPlan, updatePlan, windows, getState, closeByTitle, focusByTitle }
 })()
