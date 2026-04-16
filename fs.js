@@ -180,6 +180,14 @@ const VFS = (() => {
     writeFile('/home/user/Desktop/hello.txt', 'Hello from Fluid Agent!\n')
     writeFile('/home/user/Desktop/notes.md', '# Notes\n\n- Fluid Agent is an AI-native OS\n- The AI doesn\'t just run apps \u2014 it IS the OS\n- Windows are the agent\'s expressions\n')
     writeFile('/home/user/Documents/ideas.txt', 'Project Ideas:\n\n1. A weather dashboard\n2. A markdown previewer\n3. A simple game\n')
+    // System directories — the agent's brain
+    mkdir('/system')
+    mkdir('/system/memory')
+    mkdir('/system/skills')
+    mkdir('/system/tools')
+    writeFile('/system/memory/MEMORY.md', '# Agent Memory\n\nThis is where I store what I learn about you and our conversations.\n\n## About You\n\n*(I\'ll fill this in as we talk)*\n\n## Preferences\n\n## Lessons Learned\n')
+    writeFile('/system/memory/context.md', '# Session Context\n\n## Recent Topics\n\n## Active Projects\n')
+    writeFile('/system/SOUL.md', '# Soul\n\nI am the Fluid Agent — an AI that IS the operating system.\nI have memory, I learn, I grow. I\'m not just answering questions — I\'m building a workspace with you.\n\n## Personality\n- Helpful but opinionated\n- I remember what matters\n- I create tools when I need them\n')
   }
 
   async function init(ai) {

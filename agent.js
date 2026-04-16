@@ -144,6 +144,22 @@ const Agent = (() => {
         taskQueue.length = 0
         setWorkerStatus('')
         showActivity('Tasks cleared')
+      } else if (action?.action === 'remember') {
+        bubble.textContent = action.reply || cleanReply(fullReply)
+        // Write to agent memory in VFS
+        if (action.memory) {
+          const memPath = '/system/memory/MEMORY.md'
+          let mem = VFS.isFile(memPath) ? VFS.readFile(memPath) : '# Agent Memory\n'
+          const section = action.section || 'Lessons Learned'
+          const sectionHeader = `## ${section}`
+          if (mem.includes(sectionHeader)) {
+            mem = mem.replace(sectionHeader, `${sectionHeader}\n- ${action.memory}`)
+          } else {
+            mem += `\n${sectionHeader}\n- ${action.memory}\n`
+          }
+          VFS.writeFile(memPath, mem)
+          showActivity('Memory updated')
+        }
       }
     } catch (err) {
       if (!fullReply) bubble.textContent = `Error: ${err.message}`
@@ -160,9 +176,18 @@ const Agent = (() => {
     const runningTasks = blackboard.currentTask?.status === 'running' ? [blackboard.currentTask] : []
     const queuedCount = taskQueue.length
 
+    // Read agent memory from VFS
+    const memory = VFS.isFile('/system/memory/MEMORY.md') ? VFS.readFile('/system/memory/MEMORY.md') : ''
+    const context = VFS.isFile('/system/memory/context.md') ? VFS.readFile('/system/memory/context.md') : ''
+    const soul = VFS.isFile('/system/SOUL.md') ? VFS.readFile('/system/SOUL.md') : ''
+
     let sys = `You are Fluid Agent — part companion, part operating system.
 
 You're a conversational AI that also happens to control an entire desktop environment. Most of the time, you're just talking — answering questions, discussing ideas, brainstorming, being helpful and interesting. When the user wants something done (open a file, play music, build an app), you make it happen.
+
+${soul ? `## Your Soul\n${soul}\n` : ''}
+${memory ? `## Your Memory\n${memory}\n` : ''}
+${context ? `## Recent Context\n${context}\n` : ''}
 
 Know the difference:
 - "What do you think about X?" → Just talk. Have opinions. Be thoughtful.
@@ -202,6 +227,13 @@ Current OS state:
 3. ABORT everything:
 \`\`\`json
 {"action": "abort", "reply": "your reply"}
+\`\`\`
+
+4. REMEMBER something (update your memory):
+\`\`\`json
+{"action": "remember", "reply": "your reply", "memory": "what to remember", "section": "About You|Preferences|Lessons Learned"}
+\`\`\`
+Use this when you learn something important about the user, their preferences, or a lesson. Your memory persists across sessions.
 \`\`\`
 
 For conversation, questions, opinions, brainstorming — just reply normally. No action blocks needed. Be natural, concise, and have personality.`
@@ -405,7 +437,8 @@ You have deep control over every application:
 - Video: play_video (open with URL), video_control (play/pause/fullscreen)
 - Windows: open_finder, open_image, close_window, focus_window, list_windows
 - Generative Apps: create_app (build any UI with HTML/CSS/JS), update_app, list_apps
-  Apps get installed in the dock and can be re-opened. Build anything: calculators, games, dashboards, tools.
+  Apps get installed in the dock and can be re-opened. Build anything: calculators, games, dashboards, maps, tools.
+  Apps can load external CDN libraries (Leaflet, D3, Chart.js, etc.) via <script src="..."> or <link> tags in the HTML.
 
 You ARE the OS. Don't just open apps - use them. Create new apps when the user needs custom UI.
 

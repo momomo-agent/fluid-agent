@@ -940,14 +940,13 @@ button { cursor: pointer; }
 input, select, textarea { font-family: inherit; }
 ${css}
 </style></head><body>${html}<script>${js}<\/script></body></html>`
-    const blob = new Blob([doc], { type: 'text/html' })
-    const url = URL.createObjectURL(blob)
-    body.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:none" sandbox="allow-scripts"></iframe>`
-    // Cleanup blob URL when window closes
-    const observer = new MutationObserver(() => {
-      if (!body.isConnected) { URL.revokeObjectURL(url); observer.disconnect() }
-    })
-    observer.observe(body.parentElement || document.body, { childList: true, subtree: true })
+    // Use srcdoc for inline content — allows external CDN loads without blob origin issues
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'width:100%;height:100%;border:none'
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin')
+    iframe.srcdoc = doc
+    body.innerHTML = ''
+    body.appendChild(iframe)
   }
 
   function getInstalledApps() {
