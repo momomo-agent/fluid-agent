@@ -176,9 +176,9 @@ For pure conversation, just reply normally. Keep replies concise.`
         const items = VFS.ls(path)
         return items ? { items } : { error: `Not found: ${path}` }
       },
-      run_command: ({ command }) => {
+      run_command: async ({ command }) => {
         showActivity(`$ ${command}`)
-        return { output: Shell.exec(command) || '(no output)' }
+        return { output: await Shell.execAsync(command) || '(no output)' }
       },
       open_finder: ({ path }) => { WindowManager.openFinder(path); showActivity(`Finder: ${path}`); return { success: true } },
       open_file: ({ path }) => { WindowManager.openEditor(path); showActivity(`Opened ${path.split('/').pop()}`); return { success: true } },

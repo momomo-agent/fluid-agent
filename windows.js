@@ -169,12 +169,12 @@ const WindowManager = (() => {
     // Welcome
     appendOutput(output, 'FluidOS Terminal v1.0\nType "help" for available commands.\n', 'output')
 
-    input.addEventListener('keydown', e => {
+    input.addEventListener('keydown', async e => {
       if (e.key === 'Enter') {
         const cmd = input.value
         appendOutput(output, `user@fluid:${Shell.getCwd()}$ ${cmd}`, '')
         if (cmd.trim()) {
-          const result = Shell.exec(cmd)
+          const result = await Shell.execAsync(cmd)
           if (result === '\x1bclear') {
             output.innerHTML = ''
           } else if (result) {
