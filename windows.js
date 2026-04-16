@@ -242,14 +242,14 @@ const WindowManager = (() => {
               appendOutput(output, `Speaking: "${text}"`, 'output')
               Voice.speak(text)
             } else {
-              appendOutput(output, 'Voice not enabled. Configure ElevenLabs in Settings.', 'error')
+              appendOutput(output, 'Voice not enabled. Enable in Settings.', 'error')
             }
           } else if (cmd.trim() === 'listen') {
             if (Voice?.isEnabled()) {
               appendOutput(output, 'Listening... (click mic or type "listen" again to stop)', 'output')
               Voice.toggleListening()
             } else {
-              appendOutput(output, 'Voice not enabled. Configure ElevenLabs in Settings.', 'error')
+              appendOutput(output, 'Voice not enabled. Enable in Settings.', 'error')
             }
           } else if (cmd.trim().match(/^play(\s+\d+)?$/i)) {
             const m = cmd.trim().match(/^play(?:\s+(\d+))?$/i)
@@ -521,12 +521,13 @@ const WindowManager = (() => {
         <input class="settings-input" id="s-baseurl" type="text" placeholder="https://api.anthropic.com" value="${saved.baseUrl || ''}">
       </div>
       <div class="settings-divider"></div>
-      <div class="settings-group-title">Voice (ElevenLabs)</div>
+      <div class="settings-group-title">Voice</div>
       <div class="settings-section">
-        <label class="settings-toggle"><input type="checkbox" id="s-voice" ${saved.voice ? 'checked' : ''}> Enable voice input/output</label>
+        <label class="settings-toggle"><input type="checkbox" id="s-voice" ${saved.voice ? 'checked' : ''}> Enable voice (Web Speech API free, or ElevenLabs premium)</label>
+        <div class="settings-hint">Without API key: uses browser's built-in speech recognition. Hold mic button = push-to-talk.</div>
       </div>
       <div class="settings-section">
-        <div class="settings-label">ElevenLabs API Key</div>
+        <div class="settings-label">ElevenLabs API Key (optional, for premium voice)</div>
         <input class="settings-input" id="s-elkey" type="text" placeholder="xi-..." value="${saved.elevenLabsKey || ''}">
       </div>
       <div class="settings-section">
@@ -547,7 +548,7 @@ const WindowManager = (() => {
       }
       localStorage.setItem('fluid-settings', JSON.stringify(settings))
       Agent.configure(settings.provider, settings.apiKey, settings.model, settings.baseUrl)
-      if (settings.voice && settings.elevenLabsKey) Voice?.enable()
+      if (settings.voice) Voice?.enable()
       else Voice?.disable()
       showActivity('Settings saved')
     })

@@ -106,14 +106,62 @@
     if (settings.voice) Voice.enable()
     else Voice.disable()
 
-    // Voice button
+    // Voice button — click to toggle, long-press (push-to-talk) to record while held
     const voiceBtn = document.getElementById('voice-btn')
     if (voiceBtn) {
       if (!settings.voice) voiceBtn.style.display = 'none'
-      voiceBtn.addEventListener('click', () => {
+      let pttTimer = null
+      let isPtt = false
+
+      voiceBtn.addEventListener('mousedown', (e) => {
+        e.preventDefault()
         if (!Voice.isEnabled()) { WindowManager.openSettings(); return }
-        Voice.toggleListening()
+        // Start PTT after 200ms hold
+        pttTimer = setTimeout(() => {
+          isPtt = true
+          Voice.startListening()
+          voiceBtn.classList.add('ptt-active')
+        }, 200)
       })
+
+      const endPtt = () => {
+        if (pttTimer) { clearTimeout(pttTimer); pttTimer = null }
+        if (isPtt) {
+          isPtt = false
+          Voice.stopListening()
+          voiceBtn.classList.remove('ptt-active')
+        }
+      }
+      voiceBtn.addEventListener('mouseup', (e) => {
+        if (!isPtt && pttTimer) {
+          // Short click — toggle mode
+          clearTimeout(pttTimer); pttTimer = null
+          Voice.toggleListening()
+        } else {
+          endPtt()
+        }
+      })
+      voiceBtn.addEventListener('mouseleave', endPtt)
+
+      // Touch support for mobile
+      voiceBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault()
+        if (!Voice.isEnabled()) { WindowManager.openSettings(); return }
+        pttTimer = setTimeout(() => {
+          isPtt = true
+          Voice.startListening()
+          voiceBtn.classList.add('ptt-active')
+        }, 200)
+      }, { passive: false })
+      voiceBtn.addEventListener('touchend', (e) => {
+        if (!isPtt && pttTimer) {
+          clearTimeout(pttTimer); pttTimer = null
+          Voice.toggleListening()
+        } else {
+          endPtt()
+        }
+      })
+      voiceBtn.addEventListener('touchcancel', endPtt)
     }
   }
-})()
+})() 
