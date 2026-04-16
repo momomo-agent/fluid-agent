@@ -824,6 +824,42 @@ const WindowManager = (() => {
     })
   }
 
+  // Agent browser control
+  window.addEventListener('browser-control', (e) => {
+    const { action, url } = e.detail
+    // Find or create browser window
+    let bw = null
+    for (const [, w] of windows) { if (w.type === 'browser') { bw = w; break } }
+    if (!bw) {
+      const id = openBrowser(action === 'navigate' ? url : '')
+      return
+    }
+    if (action === 'navigate' && url) {
+      let u = url.trim()
+      if (!u.match(/^https?:\/\//)) u = 'https://' + u
+      bw.data = { ...bw.data, url: u }
+      bw.el.querySelector('.window-title').textContent = new URL(u).hostname
+      renderBrowser(bw, bw.el.querySelector('.window-body'))
+    } else if (action === 'back') {
+      bw.data = { ...bw.data, url: '' }
+      bw.el.querySelector('.window-title').textContent = 'Browser'
+      renderBrowser(bw, bw.el.querySelector('.window-body'))
+    }
+  })
+
+  // Agent video control
+  window.addEventListener('video-control', (e) => {
+    const { action } = e.detail
+    for (const [, w] of windows) {
+      if (w.type !== 'video') continue
+      const video = w.el.querySelector('video')
+      if (!video) continue
+      if (action === 'play') video.play()
+      else if (action === 'pause') video.pause()
+      else if (action === 'fullscreen') video.requestFullscreen?.().catch(() => {})
+    }
+  })
+
   // Update dock when windows change
   const origClose = close
   const _close = (id) => {

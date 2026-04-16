@@ -128,6 +128,16 @@ const Agent = (() => {
 
 You are always responsive. The user can talk to you anytime, even while tasks are running.
 
+You have deep control over every application:
+- Files & Code: create, read, edit files; run shell commands
+- Browser: open pages, navigate to URLs, go back
+- Music: play/pause, skip tracks, pick specific songs (5 synth tracks available)
+- Video: play YouTube or direct URLs, control playback
+- Terminal: execute commands and read output
+- Windows: open, close, focus, minimize any window
+
+You ARE the OS. When the user asks to "play music", "open a website", "show a video" — you do it directly with tools, not just talk about it.
+
 Current OS state:
 - Open windows: ${os.windows}
 - Focused window: ${os.focused}
@@ -230,7 +240,28 @@ For pure conversation, just reply normally. Keep replies concise.`
         return { success: true }
       },
       open_browser: ({ url }) => { WindowManager.openBrowser(url); showActivity(`🌐 Browser: ${url || 'home'}`); return { success: true } },
+      browser_navigate: ({ url }) => {
+        window.dispatchEvent(new CustomEvent('browser-control', { detail: { action: 'navigate', url } }))
+        showActivity(`🌐 Navigate: ${url}`)
+        return { success: true }
+      },
+      browser_back: () => {
+        window.dispatchEvent(new CustomEvent('browser-control', { detail: { action: 'back' } }))
+        return { success: true }
+      },
       play_video: ({ url, title }) => { WindowManager.openVideo(url, title); showActivity(`🎬 Video: ${title || url || 'player'}`); return { success: true } },
+      video_control: ({ action }) => {
+        window.dispatchEvent(new CustomEvent('video-control', { detail: { action } }))
+        showActivity(`🎬 Video: ${action}`)
+        return { success: true }
+      },
+      run_terminal: ({ command }) => {
+        // Execute command in terminal and return output
+        return Shell.execAsync(command).then(output => {
+          showActivity(`⬛ $ ${command}`)
+          return { success: true, output }
+        })
+      },
       close_window: ({ title }) => { const ok = WindowManager.closeByTitle(title); return { success: ok } },
       focus_window: ({ title }) => { const ok = WindowManager.focusByTitle(title); return { success: ok } },
       list_windows: () => ({ windows: WindowManager.getState().windows }),
@@ -257,7 +288,11 @@ For pure conversation, just reply normally. Keep replies concise.`
       open_image: { desc: 'Open and display an image by URL or path', schema: { type: 'object', properties: { src: { type: 'string', description: 'Image URL or path' }, title: { type: 'string' } }, required: ['src'] } },
       play_music: { desc: 'Control the music player. Actions: play, pause, next, prev, open', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'open'] }, track: { type: 'number', description: '0-based track index to play' } }, required: ['action'] } },
       open_browser: { desc: 'Open a web browser window, optionally navigating to a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'URL to navigate to' } } } },
+      browser_navigate: { desc: 'Navigate the browser to a URL. Opens browser if not open.', schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
+      browser_back: { desc: 'Go back to browser home page', schema: { type: 'object', properties: {} } },
       play_video: { desc: 'Open video player with a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'Video URL (YouTube embed, mp4, etc)' }, title: { type: 'string' } } } },
+      video_control: { desc: 'Control video playback', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'fullscreen'] } }, required: ['action'] } },
+      run_terminal: { desc: 'Execute a command in the terminal and return output. Use for any shell operation.', schema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
       focus_window: { desc: 'Focus/bring a window to front by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
       list_windows: { desc: 'List all open windows', schema: { type: 'object', properties: {} } },
       update_progress: { desc: 'Mark a step as done by index (0-based). Call this after completing each planned step.', schema: { type: 'object', properties: { step_index: { type: 'number', description: '0-based step index' } }, required: ['step_index'] } },
@@ -309,8 +344,18 @@ Current OS state:
 Planned steps:
 ${steps.map((s, i) => `${i}. ${s.text}`).join('\n')}
 
-IMPORTANT: After completing each planned step, call update_progress with the step_index to show progress to the user.
-Execute efficiently. Use list_windows to see what's open. Use close_window/focus_window to manage windows.
+You have deep control over every application:
+- Files: create_file, read_file, list_directory, run_command
+- Editor: open_file (opens in code editor with syntax highlighting)
+- Terminal: open_terminal (visual), run_terminal (execute command and get output)
+- Browser: open_browser, browser_navigate (go to URL), browser_back
+- Music: play_music (play/pause/next/prev, pick track by index)
+- Video: play_video (open with URL), video_control (play/pause/fullscreen)
+- Windows: open_finder, open_image, close_window, focus_window, list_windows
+
+You ARE the OS. Don't just open apps — use them. Navigate the browser, play specific music, run commands and read their output.
+
+IMPORTANT: After completing each planned step, call update_progress with the step_index.
 When finished, call the done tool with a summary.`,
         stream: false,
         tools,
