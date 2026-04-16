@@ -23,6 +23,7 @@ const Voice = (() => {
         provider: 'elevenlabs',
         apiKey: s.elevenLabsKey,
         model: 'scribe_v1',
+        mode: 'whisper',
       },
     })
     voice.on('transcript', text => {
