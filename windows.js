@@ -68,8 +68,20 @@ const WindowManager = (() => {
       if (!dragStart) return
       w.style.left = (e.clientX - dragStart.x) + 'px'
       w.style.top = (e.clientY - dragStart.y) + 'px'
+      // Snap preview
+      if (window._snapHelpers) {
+        const zone = window._snapHelpers.getSnapZone(e.clientX, e.clientY)
+        window._snapHelpers.showSnapPreview(zone)
+      }
     })
-    document.addEventListener('mouseup', () => { dragStart = null })
+    document.addEventListener('mouseup', (e) => {
+      if (dragStart && window._snapHelpers) {
+        const zone = window._snapHelpers.getSnapZone(e.clientX, e.clientY)
+        if (zone) window._snapHelpers.applySnap(zone, w)
+        window._snapHelpers.hideSnapPreview()
+      }
+      dragStart = null
+    })
 
     // Resize
     const resizeHandle = w.querySelector('.window-resize')
@@ -946,5 +958,5 @@ ${css}
     origClose(id); updateDock()
   }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle }
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()

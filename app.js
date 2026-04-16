@@ -112,6 +112,125 @@
     if (settings.voice) Voice.enable()
     else Voice.disable()
 
+    // --- Clock ---
+    const clockEl = document.getElementById('clock')
+    function updateClock() {
+      const now = new Date()
+      clockEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+    updateClock()
+    setInterval(updateClock, 30000)
+
+    // --- Worker indicator in header ---
+    const workerInd = document.getElementById('worker-indicator')
+    setInterval(() => {
+      const bb = Agent.blackboard
+      if (bb.currentTask && bb.currentTask.status === 'running') {
+        workerInd.innerHTML = `<div class="spinner"></div> ${bb.currentTask.goal?.slice(0, 30) || 'Working...'}`
+      } else {
+        workerInd.innerHTML = ''
+      }
+    }, 1000)
+
+    // --- Keyboard shortcuts ---
+    document.addEventListener('keydown', (e) => {
+      // Cmd/Ctrl+K → focus chat input
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        document.getElementById('chat-input')?.focus()
+      }
+      // Escape → close focused window
+      if (e.key === 'Escape') {
+        const focused = WindowManager.getFocused?.()
+        if (focused) WindowManager.close(focused)
+      }
+      // Cmd/Ctrl+N → new file dialog (tell agent)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault()
+        Agent.chat('Create a new file on the Desktop')
+      }
+    })
+
+    // --- Context menu ---
+    let activeMenu = null
+    function showContextMenu(x, y, items) {
+      if (activeMenu) activeMenu.remove()
+      const menu = document.createElement('div')
+      menu.className = 'context-menu'
+      items.forEach(item => {
+        if (item === '---') {
+          const sep = document.createElement('div')
+          sep.className = 'context-menu-sep'
+          menu.appendChild(sep)
+          return
+        }
+        const el = document.createElement('div')
+        el.className = 'context-menu-item'
+        el.textContent = `${item.icon || ''} ${item.label}`
+        el.addEventListener('click', () => { menu.remove(); activeMenu = null; item.action() })
+        menu.appendChild(el)
+      })
+      menu.style.left = Math.min(x, window.innerWidth - 180) + 'px'
+      menu.style.top = Math.min(y, window.innerHeight - 200) + 'px'
+      document.body.appendChild(menu)
+      activeMenu = menu
+    }
+    document.addEventListener('click', () => { if (activeMenu) { activeMenu.remove(); activeMenu = null } })
+
+    // Desktop right-click
+    document.getElementById('desktop-area').addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      showContextMenu(e.clientX, e.clientY, [
+        { icon: '📄', label: 'New File', action: () => Agent.chat('Create a new text file on the Desktop') },
+        { icon: '📁', label: 'New Folder', action: () => Agent.chat('Create a new folder on the Desktop') },
+        '---',
+        { icon: '💻', label: 'Open Terminal', action: () => WindowManager.openTerminal() },
+        { icon: '🌐', label: 'Open Browser', action: () => WindowManager.openBrowser('https://example.com') },
+        '---',
+        { icon: '🧹', label: 'Clean Desktop', action: () => Agent.chat('Organize and clean up my Desktop') },
+        { icon: '⚙️', label: 'Settings', action: () => WindowManager.openSettings() },
+      ])
+    })
+
+    // --- Window snapping ---
+    const desktopArea = document.getElementById('desktop-area')
+    let snapPreview = null
+
+    function getSnapZone(x, y) {
+      const rect = desktopArea.getBoundingClientRect()
+      const margin = 20
+      if (x - rect.left < margin) return 'left'
+      if (rect.right - x < margin) return 'right'
+      if (y - rect.top < margin) return 'top'
+      return null
+    }
+
+    // Expose snap helpers for windows.js drag handler
+    window._snapHelpers = {
+      getSnapZone,
+      showSnapPreview(zone) {
+        if (!snapPreview) {
+          snapPreview = document.createElement('div')
+          snapPreview.className = 'snap-preview'
+          desktopArea.appendChild(snapPreview)
+        }
+        const rect = desktopArea.getBoundingClientRect()
+        const w = rect.width, h = rect.height
+        if (zone === 'left') Object.assign(snapPreview.style, { left: '0', top: '0', width: w/2+'px', height: h+'px', display: 'block' })
+        else if (zone === 'right') Object.assign(snapPreview.style, { left: w/2+'px', top: '0', width: w/2+'px', height: h+'px', display: 'block' })
+        else if (zone === 'top') Object.assign(snapPreview.style, { left: '0', top: '0', width: w+'px', height: h+'px', display: 'block' })
+        else if (snapPreview) snapPreview.style.display = 'none'
+      },
+      hideSnapPreview() { if (snapPreview) snapPreview.style.display = 'none' },
+      applySnap(zone, winEl) {
+        const rect = desktopArea.getBoundingClientRect()
+        const w = rect.width, h = rect.height
+        if (zone === 'left') { winEl.style.left = '0'; winEl.style.top = '0'; winEl.style.width = w/2+'px'; winEl.style.height = h+'px' }
+        else if (zone === 'right') { winEl.style.left = w/2+'px'; winEl.style.top = '0'; winEl.style.width = w/2+'px'; winEl.style.height = h+'px' }
+        else if (zone === 'top') { winEl.style.left = '0'; winEl.style.top = '0'; winEl.style.width = w+'px'; winEl.style.height = h+'px' }
+      }
+    }
+
     // Voice button — click to toggle, long-press (push-to-talk) to record while held
     const voiceBtn = document.getElementById('voice-btn')
     if (voiceBtn) {
