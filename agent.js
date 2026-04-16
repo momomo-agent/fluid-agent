@@ -341,7 +341,8 @@ For pure conversation, just reply normally. Keep replies concise.`
           setWorkerStatus(taskQueue.length > 0 ? `⏳ ${taskQueue.length} queued` : '✅ Done')
           steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
           WindowManager.updateTask(task)
-          onTaskComplete(taskDescription)
+          // Report back to conversation with results
+          reportTaskResult(taskDescription, result.summary || '', task.log)
         }
         return result
       }
@@ -377,7 +378,7 @@ You have deep control over every application:
 You ARE the OS. Don't just open apps - use them. Create new apps when the user needs custom UI.
 
 IMPORTANT: After completing each planned step, call update_progress with the step_index.
-When finished, call the done tool with a summary.`,
+When finished, call the done tool with a detailed summary of what you found/did — this gets reported back to the user in the conversation. Include key results, findings, file contents, command outputs, etc.`,
         stream: false,
         tools,
       })
@@ -388,6 +389,7 @@ When finished, call the done tool with a summary.`,
         setWorkerStatus('✅ Done')
         steps.forEach(s => { if (s.status === 'pending') s.status = 'done' })
         WindowManager.updateTask(task)
+        reportTaskResult(taskDescription, '', task.log)
         setTimeout(() => setWorkerStatus(''), 3000)
       }
     } catch (err) {
@@ -502,14 +504,49 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
   }
 
   // Worker completion notification
-  const origDrainQueue = drainQueue
-  // Patch: notify on task completion
-  function onTaskComplete(taskDesc) {
-    if (Date.now() - lastUserMessage > 15000) {
-      // User hasn't spoken in 15s, proactively notify
-      notify(`Done: ${taskDesc}`)
+  async function reportTaskResult(taskDesc, summary, log) {
+    if (!ai) return
+    // Build a concise work report from the log
+    const logSummary = (log || []).slice(-10).join('\n')
+
+    try {
+      const bubble = createStreamBubble()
+      let fullReply = ''
+
+      await ai.chat(
+        `[TASK COMPLETED] Task: "${taskDesc}"\nWorker summary: ${summary || '(none)'}\nWork log:\n${logSummary}\n\nReport the results back to the user naturally, as if you just finished doing something for them. Be concise and informative.`,
+        {
+          system: `You are Fluid Agent. You just finished a background task. Report the results back to the user in the conversation. Be natural — like a friend saying "hey, done with that thing you asked for, here's what I found/did". Keep it concise. Include the key results/findings.`,
+          stream: true,
+          onToken: (token) => {
+            fullReply += token
+            bubble.textContent = fullReply
+            bubble.parentElement.scrollTop = bubble.parentElement.scrollHeight
+          },
+        }
+      )
+
+      if (!fullReply.trim()) {
+        // Fallback: just show the summary
+        fullReply = summary || `Done: ${taskDesc}`
+        bubble.textContent = fullReply
+      }
+
+      messages.push({ role: 'assistant', content: fullReply })
+
+      // Speak if voice enabled
+      if (Voice?.isEnabled()) Voice.speak(fullReply)
+
+      showActivity(`✅ Reported: ${taskDesc.slice(0, 40)}`)
+    } catch (e) {
+      // Fallback: just show raw summary
+      const text = summary || `Done: ${taskDesc}`
+      addBubble('agent', text)
+      messages.push({ role: 'assistant', content: text })
     }
+
+    setTimeout(() => setWorkerStatus(''), 3000)
   }
 
-  return { configure, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, onTaskComplete }
+  return { configure, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify }
 })() 
