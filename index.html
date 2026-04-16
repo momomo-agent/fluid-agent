@@ -33,9 +33,13 @@
       </div>
       <div id="desktop-area"></div>
       <div id="dock">
-        <div class="dock-item" data-app="finder" title="Finder">📁</div>
-        <div class="dock-item" data-app="terminal" title="Terminal">⬛</div>
-        <div class="dock-item" data-app="editor" title="Text Editor">📝</div>
+        <div class="dock-pinned">
+          <div class="dock-item" data-app="finder" title="Finder">📁</div>
+          <div class="dock-item" data-app="terminal" title="Terminal">⬛</div>
+          <div class="dock-item" data-app="settings" title="Settings">⚙️</div>
+        </div>
+        <div class="dock-separator"></div>
+        <div class="dock-running" id="dock-running"></div>
       </div>
     </div>
 
@@ -48,6 +52,7 @@
       <div id="chat-messages"></div>
       <div id="chat-input-area">
         <textarea id="chat-input" placeholder="Message the agent..." rows="1"></textarea>
+        <button id="voice-btn" title="Voice input">🎙️</button>
         <button id="chat-send">↑</button>
       </div>
     </div>
@@ -59,6 +64,7 @@
   <script src="fs.js"></script>
   <script src="shell.js"></script>
   <script src="windows.js"></script>
+  <script src="voice.js"></script>
   <script src="agent.js"></script>
   <script src="app.js"></script>
 </body>

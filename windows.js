@@ -44,6 +44,18 @@ const WindowManager = (() => {
       close(id)
     })
 
+    // Minimize button
+    w.querySelector('.window-dot.minimize').addEventListener('click', e => {
+      e.stopPropagation()
+      minimize(id)
+    })
+
+    // Maximize/fullscreen button
+    w.querySelector('.window-dot.maximize').addEventListener('click', e => {
+      e.stopPropagation()
+      toggleFullscreen(id)
+    })
+
     // Drag
     const titlebar = w.querySelector('.window-titlebar')
     let dragStart = null
@@ -80,6 +92,7 @@ const WindowManager = (() => {
     // Render content
     renderWindow(winObj)
     focus(id)
+    updateDock()
     return id
   }
 
@@ -101,6 +114,48 @@ const WindowManager = (() => {
     w.el.classList.add('focused')
   }
 
+  function minimize(id) {
+    const w = windows.get(id)
+    if (!w) return
+    w.el.classList.add('minimized')
+    w.minimized = true
+    updateDock()
+  }
+
+  function unminimize(id) {
+    const w = windows.get(id)
+    if (!w) return
+    w.el.classList.remove('minimized')
+    w.minimized = false
+    focus(id)
+    updateDock()
+  }
+
+  function toggleFullscreen(id) {
+    const w = windows.get(id)
+    if (!w) return
+    if (w.fullscreen) {
+      // Restore
+      w.el.style.left = w._restore.left
+      w.el.style.top = w._restore.top
+      w.el.style.width = w._restore.width
+      w.el.style.height = w._restore.height
+      w.el.classList.remove('fullscreen')
+      w.fullscreen = false
+    } else {
+      // Save and go fullscreen
+      w._restore = { left: w.el.style.left, top: w.el.style.top, width: w.el.style.width, height: w.el.style.height }
+      const a = area()
+      w.el.style.left = '0px'
+      w.el.style.top = '0px'
+      w.el.style.width = a.offsetWidth + 'px'
+      w.el.style.height = a.offsetHeight + 'px'
+      w.el.classList.add('fullscreen')
+      w.fullscreen = true
+      focus(id)
+    }
+  }
+
   function renderWindow(w) {
     const body = w.el.querySelector('.window-body')
     switch (w.type) {
@@ -108,6 +163,7 @@ const WindowManager = (() => {
       case 'terminal': renderTerminal(w, body); break
       case 'editor': renderEditor(w, body); break
       case 'plan': renderPlan(w, body); break
+      case 'settings': renderSettings(w, body); break
     }
   }
 
@@ -398,5 +454,98 @@ const WindowManager = (() => {
     return id
   }
 
-  return { create, close, focus, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openTaskManager, addTask, updateTask, windows, getState, closeByTitle, focusByTitle }
+  // --- Settings Window ---
+  let settingsId = null
+  function openSettings() {
+    if (settingsId && windows.has(settingsId)) { focus(settingsId); return settingsId }
+    settingsId = create({ type: 'settings', title: 'Settings', x: 150, y: 80, width: 420, height: 380 })
+    return settingsId
+  }
+
+  function renderSettings(w, body) {
+    const saved = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
+    body.innerHTML = `<div class="settings-body">
+      <div class="settings-section">
+        <div class="settings-label">Provider</div>
+        <select class="settings-input" id="s-provider">
+          <option value="anthropic" ${saved.provider === 'anthropic' ? 'selected' : ''}>Anthropic</option>
+          <option value="openai" ${saved.provider === 'openai' ? 'selected' : ''}>OpenAI</option>
+        </select>
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">API Key</div>
+        <input class="settings-input" id="s-apikey" type="text" placeholder="sk-..." value="${saved.apiKey || ''}">
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">Model</div>
+        <input class="settings-input" id="s-model" type="text" placeholder="claude-sonnet-4-20250514" value="${saved.model || ''}">
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">Base URL (optional)</div>
+        <input class="settings-input" id="s-baseurl" type="text" placeholder="https://api.anthropic.com" value="${saved.baseUrl || ''}">
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">Voice</div>
+        <label class="settings-toggle"><input type="checkbox" id="s-voice" ${saved.voice ? 'checked' : ''}> Enable voice input/output</label>
+      </div>
+      <button class="settings-save" id="s-save">Save & Apply</button>
+    </div>`
+    body.querySelector('#s-save').addEventListener('click', () => {
+      const settings = {
+        provider: body.querySelector('#s-provider').value,
+        apiKey: body.querySelector('#s-apikey').value,
+        model: body.querySelector('#s-model').value,
+        baseUrl: body.querySelector('#s-baseurl').value,
+        voice: body.querySelector('#s-voice').checked,
+      }
+      localStorage.setItem('fluid-settings', JSON.stringify(settings))
+      Agent.configure(settings.provider, settings.apiKey, settings.model, settings.baseUrl)
+      if (settings.voice) Voice?.enable()
+      else Voice?.disable()
+      showActivity('Settings saved')
+    })
+  }
+
+  function showActivity(text) {
+    const stream = document.getElementById('activity-stream')
+    if (!stream) return
+    const item = document.createElement('div')
+    item.className = 'activity-item'
+    item.innerHTML = `<div class="activity-dot"></div><span>${text}</span>`
+    stream.appendChild(item)
+    setTimeout(() => { if (item.parentNode) item.remove() }, 5000)
+  }
+
+  // --- Dock ---
+  function updateDock() {
+    const container = document.getElementById('dock-running')
+    if (!container) return
+    container.innerHTML = ''
+    windows.forEach((w, id) => {
+      // Skip pinned app types
+      if (['finder', 'terminal', 'settings'].includes(w.type) && !w.minimized) return
+      const item = document.createElement('div')
+      item.className = 'dock-item' + (w.minimized ? ' minimized' : '')
+      item.title = w.el.querySelector('.window-title')?.textContent || w.type
+      const icons = { editor: '📝', taskmanager: '📋', plan: '📌', image: '🖼️', finder: '📁', terminal: '⬛', settings: '⚙️' }
+      item.textContent = icons[w.type] || '🗔'
+      if (!w.minimized) {
+        const dot = document.createElement('div')
+        dot.className = 'dock-running-dot'
+        item.appendChild(dot)
+      }
+      item.addEventListener('click', () => {
+        if (w.minimized) unminimize(id)
+        else focus(id)
+      })
+      container.appendChild(item)
+    })
+  }
+
+  // Update dock when windows change
+  const origClose = close
+  // Patch close to update dock
+  const _close = (id) => { origClose(id); updateDock() }
+
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle }
 })()

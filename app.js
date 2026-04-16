@@ -17,6 +17,9 @@
   const savedBaseUrl = localStorage.getItem('fluid-baseurl')
   if (savedProvider && savedKey) {
     modal.classList.add('hidden')
+    // Sync to unified settings
+    const s = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
+    if (!s.apiKey) localStorage.setItem('fluid-settings', JSON.stringify({ provider: savedProvider, apiKey: savedKey, model: savedModel || '', baseUrl: savedBaseUrl || '', voice: s.voice || false }))
     boot(savedProvider, savedKey, savedModel, savedBaseUrl)
   }
 
@@ -83,16 +86,34 @@
       chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px'
     })
 
-    // Dock clicks
-    document.querySelectorAll('.dock-item').forEach(item => {
+    // Dock clicks (pinned apps)
+    document.querySelectorAll('.dock-pinned .dock-item').forEach(item => {
       item.addEventListener('click', () => {
         const app = item.dataset.app
         switch (app) {
           case 'finder': WindowManager.openFinder('/home/user'); break
           case 'terminal': WindowManager.openTerminal(); break
-          case 'editor': WindowManager.openEditor('/home/user/Documents/readme.txt'); break
+          case 'settings': WindowManager.openSettings(); break
         }
       })
     })
+
+    // Load settings and apply voice
+    const settings = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
+    if (settings.voice) Voice.enable()
+    else Voice.disable()
+
+    // Voice button
+    const voiceBtn = document.getElementById('voice-btn')
+    if (voiceBtn) {
+      if (!settings.voice) voiceBtn.style.display = 'none'
+      voiceBtn.addEventListener('click', () => {
+        if (!Voice.isEnabled()) { WindowManager.openSettings(); return }
+        Voice.startListening((text, isFinal) => {
+          chatInput.value = text
+          if (isFinal) sendMessage()
+        })
+      })
+    }
   }
 })()
