@@ -465,6 +465,7 @@ const WindowManager = (() => {
   function renderSettings(w, body) {
     const saved = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
     body.innerHTML = `<div class="settings-body">
+      <div class="settings-group-title">LLM</div>
       <div class="settings-section">
         <div class="settings-label">Provider</div>
         <select class="settings-input" id="s-provider">
@@ -484,9 +485,18 @@ const WindowManager = (() => {
         <div class="settings-label">Base URL (optional)</div>
         <input class="settings-input" id="s-baseurl" type="text" placeholder="https://api.anthropic.com" value="${saved.baseUrl || ''}">
       </div>
+      <div class="settings-divider"></div>
+      <div class="settings-group-title">Voice (ElevenLabs)</div>
       <div class="settings-section">
-        <div class="settings-label">Voice</div>
         <label class="settings-toggle"><input type="checkbox" id="s-voice" ${saved.voice ? 'checked' : ''}> Enable voice input/output</label>
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">ElevenLabs API Key</div>
+        <input class="settings-input" id="s-elkey" type="text" placeholder="xi-..." value="${saved.elevenLabsKey || ''}">
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">Voice ID</div>
+        <input class="settings-input" id="s-elvoice" type="text" placeholder="JBFqnCBsd6RMkjVDRZzb" value="${saved.elevenLabsVoice || ''}">
       </div>
       <button class="settings-save" id="s-save">Save & Apply</button>
     </div>`
@@ -497,10 +507,12 @@ const WindowManager = (() => {
         model: body.querySelector('#s-model').value,
         baseUrl: body.querySelector('#s-baseurl').value,
         voice: body.querySelector('#s-voice').checked,
+        elevenLabsKey: body.querySelector('#s-elkey').value,
+        elevenLabsVoice: body.querySelector('#s-elvoice').value,
       }
       localStorage.setItem('fluid-settings', JSON.stringify(settings))
       Agent.configure(settings.provider, settings.apiKey, settings.model, settings.baseUrl)
-      if (settings.voice) Voice?.enable()
+      if (settings.voice && settings.elevenLabsKey) Voice?.enable()
       else Voice?.disable()
       showActivity('Settings saved')
     })

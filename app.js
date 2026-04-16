@@ -109,10 +109,7 @@
       if (!settings.voice) voiceBtn.style.display = 'none'
       voiceBtn.addEventListener('click', () => {
         if (!Voice.isEnabled()) { WindowManager.openSettings(); return }
-        Voice.startListening((text, isFinal) => {
-          chatInput.value = text
-          if (isFinal) sendMessage()
-        })
+        Voice.toggleListening()
       })
     }
   }

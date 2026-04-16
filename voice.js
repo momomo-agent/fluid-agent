@@ -1,8 +1,41 @@
-/* voice.js — Voice input (STT) + output (TTS) via Web Speech API */
+/* voice.js — Voice I/O via agentic-voice (ElevenLabs STT + TTS) */
 const Voice = (() => {
   let enabled = false
-  let recognition = null
-  let synth = window.speechSynthesis
+  let voice = null
+  let listening = false
+
+  function getSettings() {
+    return JSON.parse(localStorage.getItem('fluid-settings') || '{}')
+  }
+
+  function init() {
+    const s = getSettings()
+    if (!s.elevenLabsKey) return null
+    if (voice) return voice
+    voice = AgenticVoice.createVoice({
+      tts: {
+        provider: 'elevenlabs',
+        apiKey: s.elevenLabsKey,
+        voice: s.elevenLabsVoice || 'JBFqnCBsd6RMkjVDRZzb',
+        model: 'eleven_turbo_v2_5',
+      },
+      stt: {
+        provider: 'elevenlabs',
+        apiKey: s.elevenLabsKey,
+        model: 'scribe_v1',
+      },
+    })
+    voice.on('transcript', text => {
+      const input = document.getElementById('chat-input')
+      if (input && text) {
+        input.value = text
+        // Auto-send
+        document.getElementById('chat-send')?.click()
+      }
+    })
+    voice.on('error', err => console.warn('[Voice]', err))
+    return voice
+  }
 
   function enable() {
     enabled = true
@@ -17,55 +50,36 @@ const Voice = (() => {
     if (btn) btn.style.display = 'none'
   }
 
-  function startListening(onResult) {
-    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-      console.warn('Speech recognition not supported')
-      return
-    }
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    recognition = new SR()
-    recognition.continuous = false
-    recognition.interimResults = true
-    recognition.lang = 'zh-CN'
-
+  function startListening() {
+    const v = init()
+    if (!v) { WindowManager.openSettings(); return }
+    listening = true
     const btn = document.getElementById('voice-btn')
     if (btn) btn.classList.add('listening')
-
-    recognition.onresult = (e) => {
-      const transcript = Array.from(e.results).map(r => r[0].transcript).join('')
-      const isFinal = e.results[e.results.length - 1].isFinal
-      if (onResult) onResult(transcript, isFinal)
-    }
-
-    recognition.onend = () => {
-      if (btn) btn.classList.remove('listening')
-      recognition = null
-    }
-
-    recognition.onerror = (e) => {
-      if (btn) btn.classList.remove('listening')
-      recognition = null
-    }
-
-    recognition.start()
+    v.startListening()
   }
 
   function stopListening() {
-    if (recognition) { recognition.stop(); recognition = null }
+    listening = false
     const btn = document.getElementById('voice-btn')
     if (btn) btn.classList.remove('listening')
+    if (voice) voice.stopListening()
   }
 
-  function speak(text) {
-    if (!enabled || !synth) return
-    synth.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'zh-CN'
-    utterance.rate = 1.1
-    synth.speak(utterance)
+  function toggleListening() {
+    if (listening) stopListening()
+    else startListening()
+  }
+
+  async function speak(text) {
+    if (!enabled) return
+    const v = init()
+    if (!v) return
+    try { await v.speak(text) } catch (e) { console.warn('[Voice TTS]', e) }
   }
 
   function isEnabled() { return enabled }
+  function isListening() { return listening }
 
-  return { enable, disable, startListening, stopListening, speak, isEnabled }
+  return { enable, disable, startListening, stopListening, toggleListening, speak, isEnabled, isListening }
 })()

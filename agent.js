@@ -112,6 +112,10 @@ const Agent = (() => {
     } catch (err) {
       if (!fullReply) bubble.textContent = `Error: ${err.message}`
     }
+
+    // Speak the reply if voice is enabled
+    const spokenText = bubble.textContent
+    if (spokenText && Voice?.isEnabled()) Voice.speak(spokenText)
   }
 
   function cleanReply(text) { return text.replace(/```json[\s\S]*?```/g, '').trim() }
