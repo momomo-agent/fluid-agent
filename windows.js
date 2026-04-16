@@ -80,8 +80,11 @@ const WindowManager = (() => {
   function close(id) {
     const w = windows.get(id)
     if (!w) return
-    w.el.remove()
-    windows.delete(id)
+    w.el.classList.add('closing')
+    setTimeout(() => {
+      w.el.remove()
+      windows.delete(id)
+    }, 200)
   }
 
   function focus(id) {
