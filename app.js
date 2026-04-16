@@ -57,6 +57,9 @@
     // Wire chat input
     const chatInput = document.getElementById('chat-input')
     const chatSend = document.getElementById('chat-send')
+    let isComposing = false
+    chatInput.addEventListener('compositionstart', () => { isComposing = true })
+    chatInput.addEventListener('compositionend', () => { isComposing = false })
 
     function sendMessage() {
       const text = chatInput.value.trim()
@@ -68,7 +71,7 @@
 
     chatSend.addEventListener('click', sendMessage)
     chatInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
         e.preventDefault()
         sendMessage()
       }
