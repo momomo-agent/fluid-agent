@@ -93,6 +93,7 @@
         switch (app) {
           case 'finder': WindowManager.openFinder('/home/user'); break
           case 'terminal': WindowManager.openTerminal(); break
+          case 'music': WindowManager.openMusic(); break
           case 'settings': WindowManager.openSettings(); break
         }
       })

@@ -221,6 +221,14 @@ For pure conversation, just reply normally. Keep replies concise.`
       open_file: ({ path }) => { WindowManager.openEditor(path); showActivity(`Opened ${path.split('/').pop()}`); return { success: true } },
       open_terminal: () => { WindowManager.openTerminal(); showActivity('Opened Terminal'); return { success: true } },
       open_image: ({ src, title }) => { WindowManager.openImage(src, title); showActivity(`Opened image: ${title || src.split('/').pop()}`); return { success: true } },
+      play_music: ({ action, track }) => {
+        WindowManager.openMusic()
+        // Expose musicState for agent control — handled via custom event
+        const evt = new CustomEvent('music-control', { detail: { action, track } })
+        window.dispatchEvent(evt)
+        showActivity(`🎵 Music: ${action}${track != null ? ' #' + track : ''}`)
+        return { success: true }
+      },
       close_window: ({ title }) => { const ok = WindowManager.closeByTitle(title); return { success: ok } },
       focus_window: ({ title }) => { const ok = WindowManager.focusByTitle(title); return { success: ok } },
       list_windows: () => ({ windows: WindowManager.getState().windows }),
@@ -245,6 +253,7 @@ For pure conversation, just reply normally. Keep replies concise.`
       open_terminal: { desc: 'Open terminal window', schema: { type: 'object', properties: {} } },
       close_window: { desc: 'Close a window by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
       open_image: { desc: 'Open and display an image by URL or path', schema: { type: 'object', properties: { src: { type: 'string', description: 'Image URL or path' }, title: { type: 'string' } }, required: ['src'] } },
+      play_music: { desc: 'Control the music player. Actions: play, pause, next, prev, open', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'open'] }, track: { type: 'number', description: '0-based track index to play' } }, required: ['action'] } },
       focus_window: { desc: 'Focus/bring a window to front by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
       list_windows: { desc: 'List all open windows', schema: { type: 'object', properties: {} } },
       update_progress: { desc: 'Mark a step as done by index (0-based). Call this after completing each planned step.', schema: { type: 'object', properties: { step_index: { type: 'number', description: '0-based step index' } }, required: ['step_index'] } },

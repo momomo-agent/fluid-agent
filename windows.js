@@ -164,6 +164,7 @@ const WindowManager = (() => {
       case 'editor': renderEditor(w, body); break
       case 'plan': renderPlan(w, body); break
       case 'settings': renderSettings(w, body); break
+      case 'music': renderMusic(w, body); break
     }
   }
 
@@ -554,10 +555,136 @@ const WindowManager = (() => {
     })
   }
 
+  // --- Music Player ---
+  let musicId = null
+  const musicState = {
+    playlist: [
+      { title: 'Midnight Drive', artist: 'Synthwave FM', duration: 234, color: '#60a5fa' },
+      { title: 'Neon Lights', artist: 'Retro Wave', duration: 198, color: '#a78bfa' },
+      { title: 'Ocean Breeze', artist: 'Lo-Fi Beats', duration: 267, color: '#34d399' },
+      { title: 'City Rain', artist: 'Ambient Works', duration: 312, color: '#f472b6' },
+      { title: 'Starlight', artist: 'Chillhop', duration: 185, color: '#fbbf24' },
+    ],
+    current: 0,
+    playing: false,
+    elapsed: 0,
+    timer: null,
+  }
+
+  function openMusic() {
+    if (musicId && windows.has(musicId)) { focus(musicId); return musicId }
+    musicId = create({ type: 'music', title: 'Music', x: 200, y: 100, width: 340, height: 420 })
+    return musicId
+  }
+
+  function renderMusic(w, body) {
+    const s = musicState
+    const track = s.playlist[s.current]
+    const pct = track.duration > 0 ? (s.elapsed / track.duration * 100) : 0
+    const fmt = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+
+    body.innerHTML = `<div class="music-player">
+      <div class="music-art" style="background: linear-gradient(135deg, ${track.color}33, ${track.color}11)">
+        <div class="music-art-icon" style="color: ${track.color}">${s.playing ? '♫' : '♪'}</div>
+      </div>
+      <div class="music-info">
+        <div class="music-title">${track.title}</div>
+        <div class="music-artist">${track.artist}</div>
+      </div>
+      <div class="music-progress">
+        <div class="music-bar"><div class="music-bar-fill" style="width:${pct}%;background:${track.color}"></div></div>
+        <div class="music-times"><span>${fmt(s.elapsed)}</span><span>${fmt(track.duration)}</span></div>
+      </div>
+      <div class="music-controls">
+        <button class="music-btn" id="music-prev">⏮</button>
+        <button class="music-btn music-play" id="music-toggle">${s.playing ? '⏸' : '▶'}</button>
+        <button class="music-btn" id="music-next">⏭</button>
+      </div>
+      <div class="music-list">${s.playlist.map((t, i) => `
+        <div class="music-track ${i === s.current ? 'active' : ''}" data-idx="${i}">
+          <span class="music-track-dot" style="background:${t.color}"></span>
+          <span class="music-track-title">${t.title}</span>
+          <span class="music-track-artist">${t.artist}</span>
+          <span class="music-track-dur">${fmt(t.duration)}</span>
+        </div>`).join('')}
+      </div>
+    </div>`
+
+    body.querySelector('#music-toggle').addEventListener('click', () => {
+      s.playing = !s.playing
+      if (s.playing) {
+        s.timer = setInterval(() => {
+          s.elapsed += 1
+          if (s.elapsed >= s.playlist[s.current].duration) {
+            s.current = (s.current + 1) % s.playlist.length
+            s.elapsed = 0
+          }
+          if (musicId && windows.has(musicId)) renderMusic(windows.get(musicId), body)
+        }, 1000)
+      } else {
+        clearInterval(s.timer)
+      }
+      renderMusic(w, body)
+    })
+    body.querySelector('#music-prev').addEventListener('click', () => {
+      clearInterval(s.timer); s.playing = false
+      s.current = (s.current - 1 + s.playlist.length) % s.playlist.length
+      s.elapsed = 0
+      renderMusic(w, body)
+    })
+    body.querySelector('#music-next').addEventListener('click', () => {
+      clearInterval(s.timer); s.playing = false
+      s.current = (s.current + 1) % s.playlist.length
+      s.elapsed = 0
+      renderMusic(w, body)
+    })
+    body.querySelectorAll('.music-track').forEach(el => {
+      el.addEventListener('click', () => {
+        clearInterval(s.timer); s.playing = false
+        s.current = parseInt(el.dataset.idx)
+        s.elapsed = 0
+        renderMusic(w, body)
+      })
+    })
+  }
+
+  // Agent music control via custom event
+  window.addEventListener('music-control', (e) => {
+    const { action, track } = e.detail
+    const s = musicState
+    if (track != null && track >= 0 && track < s.playlist.length) {
+      clearInterval(s.timer); s.playing = false
+      s.current = track; s.elapsed = 0
+    }
+    if (action === 'play' || action === 'open') {
+      if (!s.playing) {
+        s.playing = true
+        s.timer = setInterval(() => {
+          s.elapsed += 1
+          if (s.elapsed >= s.playlist[s.current].duration) {
+            s.current = (s.current + 1) % s.playlist.length; s.elapsed = 0
+          }
+          if (musicId && windows.has(musicId)) renderMusic(windows.get(musicId), windows.get(musicId).el.querySelector('.window-body'))
+        }, 1000)
+      }
+    } else if (action === 'pause') {
+      clearInterval(s.timer); s.playing = false
+    } else if (action === 'next') {
+      clearInterval(s.timer); s.playing = false
+      s.current = (s.current + 1) % s.playlist.length; s.elapsed = 0
+    } else if (action === 'prev') {
+      clearInterval(s.timer); s.playing = false
+      s.current = (s.current - 1 + s.playlist.length) % s.playlist.length; s.elapsed = 0
+    }
+    if (musicId && windows.has(musicId)) renderMusic(windows.get(musicId), windows.get(musicId).el.querySelector('.window-body'))
+  })
+
   // Update dock when windows change
   const origClose = close
-  // Patch close to update dock
-  const _close = (id) => { origClose(id); updateDock() }
+  const _close = (id) => {
+    if (id === musicId) { clearInterval(musicState.timer); musicState.playing = false; musicId = null }
+    origClose(id); updateDock()
+  }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle }
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle }
 })()
