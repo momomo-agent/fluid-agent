@@ -2,69 +2,54 @@
 ;(function() {
   'use strict'
 
-  // ── API Key Modal ──
-  const modal = document.getElementById('api-modal')
-  const providerSelect = document.getElementById('provider-select')
-  const apiKeyInput = document.getElementById('api-key-input')
-  const modelInput = document.getElementById('model-input')
-  const baseurlInput = document.getElementById('baseurl-input')
-  const apiKeySubmit = document.getElementById('api-key-submit')
+  // Always boot the OS immediately — no modal gate
+  boot()
 
-  // Check localStorage
-  const savedProvider = localStorage.getItem('fluid-provider')
-  const savedKey = localStorage.getItem('fluid-apikey')
-  const savedModel = localStorage.getItem('fluid-model')
-  const savedBaseUrl = localStorage.getItem('fluid-baseurl')
-  if (savedProvider && savedKey) {
-    modal.classList.add('hidden')
-    // Sync to unified settings
-    const s = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
-    if (!s.apiKey) localStorage.setItem('fluid-settings', JSON.stringify({ provider: savedProvider, apiKey: savedKey, model: savedModel || '', baseUrl: savedBaseUrl || '', voice: s.voice || false }))
-    boot(savedProvider, savedKey, savedModel, savedBaseUrl)
-  }
+  async function boot() {
+    // Read saved settings
+    const settings = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
+    const provider = settings.provider || localStorage.getItem('fluid-provider') || ''
+    const apiKey = settings.apiKey || localStorage.getItem('fluid-apikey') || ''
+    const model = settings.model || localStorage.getItem('fluid-model') || ''
+    const baseUrl = settings.baseUrl || localStorage.getItem('fluid-baseurl') || ''
 
-  apiKeySubmit.addEventListener('click', () => {
-    const provider = providerSelect.value
-    const key = apiKeyInput.value.trim()
-    const model = modelInput.value.trim()
-    const baseUrl = baseurlInput.value.trim()
-    if (!key) return
-    localStorage.setItem('fluid-provider', provider)
-    localStorage.setItem('fluid-apikey', key)
-    if (model) localStorage.setItem('fluid-model', model)
-    else localStorage.removeItem('fluid-model')
-    if (baseUrl) localStorage.setItem('fluid-baseurl', baseUrl)
-    else localStorage.removeItem('fluid-baseurl')
-    modal.classList.add('hidden')
-    boot(provider, key, model, baseUrl)
-  })
+    // Configure agent if we have credentials
+    const hasKey = !!(provider && apiKey)
+    if (hasKey) {
+      Agent.configure(provider, apiKey, model, baseUrl)
+    }
 
-  apiKeyInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') apiKeySubmit.click()
-  })
+    // Init persistence through the glue layer
+    const ai = hasKey ? Agent.getAi() : null
+    if (ai) {
+      await VFS.init(ai)
+      await WindowManager.loadApps(ai)
+    } else {
+      VFS.initDefaults()
+    }
 
-  async function boot(provider, apiKey, model, baseUrl) {
-    // Init agentic-store — single store for the whole OS
-    Agent.configure(provider, apiKey, model, baseUrl)
-    // ai instance is now ready — init persistence through the glue layer
-    const ai = Agent.getAi()
-    await VFS.init(ai)
-    await WindowManager.loadApps(ai)
     document.getElementById('app').style.display = 'flex'
 
-    // Start proactive awareness loop
-    Agent.startProactiveLoop()
+    // Start proactive awareness loop (only if configured)
+    if (hasKey) Agent.startProactiveLoop()
 
-    // Open initial Finder window
+    // Open initial windows
     WindowManager.openFinder('/home/user/Desktop')
+
+    // No API key? Open Settings so user can configure
+    if (!hasKey) {
+      WindowManager.openSettings()
+    }
 
     // Restore previous chat or show welcome
     const container = document.getElementById('chat-messages')
-    await Agent.restoreChatUI()
+    if (hasKey) await Agent.restoreChatUI()
     if (container.children.length === 0) {
       const bubble = document.createElement('div')
       bubble.className = 'chat-bubble agent'
-      bubble.textContent = "Hey! I'm Fluid Agent — part companion, part OS. Ask me anything, or tell me to do something."
+      bubble.textContent = hasKey
+        ? "Hey! I'm Fluid Agent — part companion, part OS. Ask me anything, or tell me to do something."
+        : "Welcome to Fluid Agent OS! Open Settings to add your API key and get started."
       container.appendChild(bubble)
     }
 
@@ -113,7 +98,6 @@
     })
 
     // Load settings and apply voice
-    const settings = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
     if (settings.voice) Voice.enable()
     else Voice.disable()
 
@@ -330,68 +314,30 @@
       applySnap(zone, winEl) {
         const rect = desktopArea.getBoundingClientRect()
         const w = rect.width, h = rect.height
-        if (zone === 'left') { winEl.style.left = '0'; winEl.style.top = '0'; winEl.style.width = w/2+'px'; winEl.style.height = h+'px' }
-        else if (zone === 'right') { winEl.style.left = w/2+'px'; winEl.style.top = '0'; winEl.style.width = w/2+'px'; winEl.style.height = h+'px' }
-        else if (zone === 'top') { winEl.style.left = '0'; winEl.style.top = '0'; winEl.style.width = w+'px'; winEl.style.height = h+'px' }
+        if (zone === 'left') Object.assign(winEl.style, { left: '0', top: '0', width: w/2+'px', height: h+'px' })
+        else if (zone === 'right') Object.assign(winEl.style, { left: w/2+'px', top: '0', width: w/2+'px', height: h+'px' })
+        else if (zone === 'top') Object.assign(winEl.style, { left: '0', top: '0', width: w+'px', height: h+'px' })
       }
     }
 
-    // Voice button — click to toggle, long-press (push-to-talk) to record while held
-    const voiceBtn = document.getElementById('voice-btn')
-    if (voiceBtn) {
-      if (!settings.voice) voiceBtn.style.display = 'none'
-      let pttTimer = null
-      let isPtt = false
-
-      voiceBtn.addEventListener('mousedown', (e) => {
-        e.preventDefault()
-        if (!Voice.isEnabled()) { WindowManager.openSettings(); return }
-        // Start PTT after 200ms hold
-        pttTimer = setTimeout(() => {
-          isPtt = true
-          Voice.startListening()
-          voiceBtn.classList.add('ptt-active')
-        }, 200)
+    // --- Mic button (push-to-talk) ---
+    const micBtn = document.getElementById('mic-btn')
+    if (micBtn) {
+      let micActive = false
+      micBtn.addEventListener('mousedown', () => {
+        micActive = true
+        micBtn.classList.add('active')
+        Voice.startListening()
       })
-
-      const endPtt = () => {
-        if (pttTimer) { clearTimeout(pttTimer); pttTimer = null }
-        if (isPtt) {
-          isPtt = false
+      const stopMic = () => {
+        if (micActive) {
+          micActive = false
+          micBtn.classList.remove('active')
           Voice.stopListening()
-          voiceBtn.classList.remove('ptt-active')
         }
       }
-      voiceBtn.addEventListener('mouseup', (e) => {
-        if (!isPtt && pttTimer) {
-          // Short click — toggle mode
-          clearTimeout(pttTimer); pttTimer = null
-          Voice.toggleListening()
-        } else {
-          endPtt()
-        }
-      })
-      voiceBtn.addEventListener('mouseleave', endPtt)
-
-      // Touch support for mobile
-      voiceBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault()
-        if (!Voice.isEnabled()) { WindowManager.openSettings(); return }
-        pttTimer = setTimeout(() => {
-          isPtt = true
-          Voice.startListening()
-          voiceBtn.classList.add('ptt-active')
-        }, 200)
-      }, { passive: false })
-      voiceBtn.addEventListener('touchend', (e) => {
-        if (!isPtt && pttTimer) {
-          clearTimeout(pttTimer); pttTimer = null
-          Voice.toggleListening()
-        } else {
-          endPtt()
-        }
-      })
-      voiceBtn.addEventListener('touchcancel', endPtt)
+      micBtn.addEventListener('mouseup', stopMic)
+      micBtn.addEventListener('mouseleave', stopMic)
     }
 
     // --- Notification Center ---
@@ -404,9 +350,9 @@
     let notifItems = []
     let unreadCount = 0
 
-    // Load persisted notifications via store
-    ai.load('notifs').then(saved => { if (saved) { notifItems = saved; renderNotifs() } })
-    function saveNotifs() { ai.save('notifs', notifItems) }
+    // Load persisted notifications via agentic glue
+    if (ai) ai.load('notifs').then(saved => { if (saved) { notifItems = saved; renderNotifs() } })
+    function saveNotifs() { if (ai) ai.save('notifs', notifItems) }
 
     function renderNotifs() {
       notifList.innerHTML = ''
@@ -441,20 +387,13 @@
 
     notifClear.addEventListener('click', () => {
       notifItems = []; unreadCount = 0
-      ai.deleteKey('notifs')
+      if (ai) ai.deleteKey('notifs')
       renderNotifs()
-    })
-
-    // Close panel on outside click
-    document.addEventListener('click', (e) => {
-      if (!notifPanel.contains(e.target) && e.target !== notifBtn && !notifBtn.contains(e.target)) {
-        notifPanel.classList.add('hidden')
-      }
     })
 
     renderNotifs()
 
-    // Hook into Agent.notify to also push to notification center
+    // Hook into Agent.notify
     const origNotify = Agent.notify
     Agent.notify = function(text, type) {
       origNotify.call(Agent, text, type)
@@ -495,4 +434,4 @@
       }
     })
   }
-})() 
+})()

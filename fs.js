@@ -170,21 +170,27 @@ const VFS = (() => {
   on(() => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 1000) })
 
   // Init: connect to agentic, restore or create defaults
+  function createDefaults() {
+    mkdir('/home/user/Desktop')
+    mkdir('/home/user/Documents')
+    mkdir('/home/user/Downloads')
+    mkdir('/home/user/Desktop/projects')
+    writeFile('/home/user/Documents/readme.txt',
+      'Welcome to Fluid Agent OS\n\nThis is a virtual operating system powered by AI.\nThe agent can create files, open windows, and execute commands.\nTry chatting with the agent on the right panel!\n')
+    writeFile('/home/user/Desktop/hello.txt', 'Hello from Fluid Agent!\n')
+    writeFile('/home/user/Desktop/notes.md', '# Notes\n\n- Fluid Agent is an AI-native OS\n- The AI doesn\'t just run apps \u2014 it IS the OS\n- Windows are the agent\'s expressions\n')
+    writeFile('/home/user/Documents/ideas.txt', 'Project Ideas:\n\n1. A weather dashboard\n2. A markdown previewer\n3. A simple game\n')
+  }
+
   async function init(ai) {
     _ai = ai
     const restored = await load()
-    if (!restored) {
-      mkdir('/home/user/Desktop')
-      mkdir('/home/user/Documents')
-      mkdir('/home/user/Downloads')
-      mkdir('/home/user/Desktop/projects')
-      writeFile('/home/user/Documents/readme.txt',
-        'Welcome to Fluid Agent OS\n\nThis is a virtual operating system powered by AI.\nThe agent can create files, open windows, and execute commands.\nTry chatting with the agent on the right panel!\n')
-      writeFile('/home/user/Desktop/hello.txt', 'Hello from Fluid Agent!\n')
-      writeFile('/home/user/Desktop/notes.md', '# Notes\n\n- Fluid Agent is an AI-native OS\n- The AI doesn\'t just run apps \u2014 it IS the OS\n- Windows are the agent\'s expressions\n')
-      writeFile('/home/user/Documents/ideas.txt', 'Project Ideas:\n\n1. A weather dashboard\n2. A markdown previewer\n3. A simple game\n')
-    }
+    if (!restored) createDefaults()
   }
 
-  return { resolve, mkdir, writeFile, readFile, ls, exists, isDir, isFile, rm, cp, mv, find, grep, normPath, on, save, load, init }
+  function initDefaults() {
+    createDefaults()
+  }
+
+  return { resolve, mkdir, writeFile, readFile, ls, exists, isDir, isFile, rm, cp, mv, find, grep, normPath, on, save, load, init, initDefaults }
 })()

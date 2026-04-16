@@ -560,8 +560,12 @@ const WindowManager = (() => {
       }
       localStorage.setItem('fluid-settings', JSON.stringify(settings))
       Agent.configure(settings.provider, settings.apiKey, settings.model, settings.baseUrl)
+      // Init persistence if this is the first configure
+      const ai = Agent.getAi()
+      if (ai) VFS.init(ai).then(() => WindowManager.loadApps(ai))
       if (settings.voice) Voice?.enable()
       else Voice?.disable()
+      Agent.startProactiveLoop()
       showActivity('Settings saved')
     })
   }
