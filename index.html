@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluid Agent</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- API Key Modal -->
+  <div id="api-modal" class="modal-overlay">
+    <div class="modal">
+      <h2>Fluid Agent</h2>
+      <p>Enter your API key to get started</p>
+      <select id="provider-select">
+        <option value="anthropic">Anthropic</option>
+        <option value="openai">OpenAI</option>
+      </select>
+      <input type="text" id="api-key-input" placeholder="sk-..." autocomplete="off">
+      <button id="api-key-submit">Start</button>
+    </div>
+  </div>
+
+  <!-- Main Layout -->
+  <div id="app">
+    <!-- Left: Virtual Desktop -->
+    <div id="desktop">
+      <div id="desktop-header">
+        <span class="desktop-title">Fluid Agent OS</span>
+        <div id="activity-stream"></div>
+      </div>
+      <div id="desktop-area"></div>
+      <div id="dock">
+        <div class="dock-item" data-app="finder" title="Finder">📁</div>
+        <div class="dock-item" data-app="terminal" title="Terminal">⬛</div>
+        <div class="dock-item" data-app="editor" title="Text Editor">📝</div>
+      </div>
+    </div>
+
+    <!-- Right: Chat Panel -->
+    <div id="chat-panel">
+      <div id="chat-header">
+        <div class="chat-title">Agent</div>
+        <div id="worker-status"></div>
+      </div>
+      <div id="chat-messages"></div>
+      <div id="chat-input-area">
+        <textarea id="chat-input" placeholder="Message the agent..." rows="1"></textarea>
+        <button id="chat-send">↑</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="lib/agentic-core.js"></script>
+  <script src="fs.js"></script>
+  <script src="shell.js"></script>
+  <script src="windows.js"></script>
+  <script src="agent.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
