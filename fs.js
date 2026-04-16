@@ -1,11 +1,11 @@
-/* fs.js — Virtual filesystem with localStorage persistence */
+/* fs.js — Virtual filesystem backed by agentic-store */
 const VFS = (() => {
-  // Node: { name, type: 'dir'|'file', children: Map, content: string, created: number }
   function makeDir(name) { return { name, type: 'dir', children: new Map(), created: Date.now() } }
   function makeFile(name, content = '') { return { name, type: 'file', content, created: Date.now() } }
 
   const root = makeDir('/')
   const listeners = []
+  let store = null
 
   function on(fn) { listeners.push(fn) }
   function emit(event, path) { listeners.forEach(fn => fn(event, path)) }
@@ -48,9 +48,7 @@ const VFS = (() => {
     const parts = path.split('/').filter(Boolean)
     let node = root
     for (const p of parts) {
-      if (!node.children.has(p)) {
-        node.children.set(p, makeDir(p))
-      }
+      if (!node.children.has(p)) node.children.set(p, makeDir(p))
       node = node.children.get(p)
     }
     emit('mkdir', path)
@@ -114,9 +112,7 @@ const VFS = (() => {
     function walk(node, currentPath) {
       if (node.name.includes(pattern)) results.push(currentPath)
       if (node.type === 'dir') {
-        for (const [name, child] of node.children) {
-          walk(child, currentPath + '/' + name)
-        }
+        for (const [name, child] of node.children) walk(child, currentPath + '/' + name)
       }
     }
     const start = resolve(path)
@@ -133,7 +129,7 @@ const VFS = (() => {
       .filter(l => l.text.includes(pattern))
   }
 
-  // --- Persistence ---
+  // --- Persistence via agentic-store ---
   function serialize() {
     function nodeToObj(node) {
       if (node.type === 'file') return { n: node.name, t: 'f', c: node.content }
@@ -141,50 +137,54 @@ const VFS = (() => {
       for (const [k, v] of node.children) ch[k] = nodeToObj(v)
       return { n: node.name, t: 'd', ch }
     }
-    return JSON.stringify(nodeToObj(root))
+    return nodeToObj(root)
   }
 
-  function deserialize(json) {
-    try {
-      const data = JSON.parse(json)
-      function objToNode(obj) {
-        if (obj.t === 'f') return makeFile(obj.n, obj.c || '')
-        const dir = makeDir(obj.n)
-        if (obj.ch) for (const [k, v] of Object.entries(obj.ch)) dir.children.set(k, objToNode(v))
-        return dir
-      }
-      const restored = objToNode(data)
-      root.children = restored.children
-      return true
-    } catch (e) { return false }
+  function deserialize(data) {
+    function objToNode(obj) {
+      if (obj.t === 'f') return makeFile(obj.n, obj.c || '')
+      const dir = makeDir(obj.n)
+      if (obj.ch) for (const [k, v] of Object.entries(obj.ch)) dir.children.set(k, objToNode(v))
+      return dir
+    }
+    const restored = objToNode(data)
+    root.children = restored.children
+    return true
   }
 
   let saveTimer = null
-  function save() {
-    try { localStorage.setItem('fluid-vfs', serialize()) } catch (e) {}
+  async function save() {
+    if (!store) return
+    await store.set('vfs', serialize())
   }
 
-  function load() {
-    const saved = localStorage.getItem('fluid-vfs')
-    if (saved) return deserialize(saved)
+  async function load() {
+    if (!store) return false
+    const data = await store.get('vfs')
+    if (data) return deserialize(data)
     return false
   }
 
   // Auto-save on changes (debounced 1s)
   on(() => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 1000) })
 
-  // Try restore, otherwise init defaults
-  if (!load()) {
-    mkdir('/home/user/Desktop')
-    mkdir('/home/user/Documents')
-    mkdir('/home/user/Downloads')
-    mkdir('/home/user/Desktop/projects')
-    writeFile('/home/user/Documents/readme.txt',
-      'Welcome to Fluid Agent OS\n\nThis is a virtual operating system powered by AI.\nThe agent can create files, open windows, and execute commands.\nTry chatting with the agent on the right panel!\n\nTip: You can interrupt the agent at any time \u2014 it will respond immediately.\n')
-    writeFile('/home/user/Desktop/hello.txt', 'Hello from Fluid Agent!\n')
-    writeFile('/home/user/Desktop/notes.md', '# Notes\n\n- Fluid Agent is an AI-native OS\n- The AI doesn\'t just run apps \u2014 it IS the OS\n- Windows are the agent\'s expressions\n')
-    writeFile('/home/user/Documents/ideas.txt', 'Project Ideas:\n\n1. A weather dashboard\n2. A markdown previewer\n3. A simple game\n')
+  // Init: connect to store, restore or create defaults
+  async function init() {
+    store = await AgenticStore.createStore('fluid-agent')
+    const restored = await load()
+    if (!restored) {
+      mkdir('/home/user/Desktop')
+      mkdir('/home/user/Documents')
+      mkdir('/home/user/Downloads')
+      mkdir('/home/user/Desktop/projects')
+      writeFile('/home/user/Documents/readme.txt',
+        'Welcome to Fluid Agent OS\n\nThis is a virtual operating system powered by AI.\nThe agent can create files, open windows, and execute commands.\nTry chatting with the agent on the right panel!\n')
+      writeFile('/home/user/Desktop/hello.txt', 'Hello from Fluid Agent!\n')
+      writeFile('/home/user/Desktop/notes.md', '# Notes\n\n- Fluid Agent is an AI-native OS\n- The AI doesn\'t just run apps \u2014 it IS the OS\n- Windows are the agent\'s expressions\n')
+      writeFile('/home/user/Documents/ideas.txt', 'Project Ideas:\n\n1. A weather dashboard\n2. A markdown previewer\n3. A simple game\n')
+    }
+    return store
   }
 
-  return { resolve, mkdir, writeFile, readFile, ls, exists, isDir, isFile, rm, cp, mv, find, grep, normPath, on, save, load }
+  return { resolve, mkdir, writeFile, readFile, ls, exists, isDir, isFile, rm, cp, mv, find, grep, normPath, on, save, load, init }
 })()

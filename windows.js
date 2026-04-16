@@ -895,25 +895,23 @@ const WindowManager = (() => {
 
   // --- Generative App ---
   const installedApps = new Map() // name -> { html, css, js, icon, width, height }
+  let _store = null
 
-  // Persist apps
-  function saveApps() {
-    try {
-      const obj = {}
-      for (const [k, v] of installedApps) obj[k] = v
-      localStorage.setItem('fluid-apps', JSON.stringify(obj))
-    } catch (e) {}
+  // Persist apps via agentic-store
+  async function saveApps() {
+    if (!_store) return
+    const obj = {}
+    for (const [k, v] of installedApps) obj[k] = v
+    await _store.set('apps', obj)
   }
-  function loadApps() {
-    try {
-      const saved = localStorage.getItem('fluid-apps')
-      if (saved) {
-        const obj = JSON.parse(saved)
-        for (const [k, v] of Object.entries(obj)) installedApps.set(k, v)
-      }
-    } catch (e) {}
+  async function loadApps(store) {
+    _store = store
+    if (!store) return
+    const saved = await store.get('apps')
+    if (saved) {
+      for (const [k, v] of Object.entries(saved)) installedApps.set(k, v)
+    }
   }
-  loadApps()
 
   function openApp(name, html, css, js, opts = {}) {
     if (html) {
@@ -958,5 +956,5 @@ ${css}
     origClose(id); updateDock()
   }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()

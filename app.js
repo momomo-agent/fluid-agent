@@ -43,8 +43,11 @@
     if (e.key === 'Enter') apiKeySubmit.click()
   })
 
-  function boot(provider, apiKey, model, baseUrl) {
-    Agent.configure(provider, apiKey, model, baseUrl)
+  async function boot(provider, apiKey, model, baseUrl) {
+    // Init agentic-store — single store for the whole OS
+    const store = await VFS.init()
+    await WindowManager.loadApps(store)
+    Agent.configure(provider, apiKey, model, baseUrl, store)
     document.getElementById('app').style.display = 'flex'
 
     // Start proactive awareness loop
@@ -55,7 +58,7 @@
 
     // Restore previous chat or show welcome
     const container = document.getElementById('chat-messages')
-    Agent.restoreChatUI()
+    await Agent.restoreChatUI()
     if (container.children.length === 0) {
       const bubble = document.createElement('div')
       bubble.className = 'chat-bubble agent'
@@ -399,11 +402,9 @@
     let notifItems = []
     let unreadCount = 0
 
-    // Load persisted notifications
-    try {
-      const saved = localStorage.getItem('fluid-notifs')
-      if (saved) notifItems = JSON.parse(saved)
-    } catch (e) {}
+    // Load persisted notifications via store
+    store.get('notifs').then(saved => { if (saved) { notifItems = saved; renderNotifs() } })
+    function saveNotifs() { store.set('notifs', notifItems) }
 
     function renderNotifs() {
       notifList.innerHTML = ''
@@ -422,7 +423,7 @@
       notifItems.push({ text, time: Date.now(), unread: true })
       unreadCount++
       if (notifItems.length > 50) notifItems = notifItems.slice(-50)
-      try { localStorage.setItem('fluid-notifs', JSON.stringify(notifItems)) } catch (e) {}
+      saveNotifs()
       renderNotifs()
     }
 
@@ -432,13 +433,13 @@
         unreadCount = 0
         notifItems.forEach(n => n.unread = false)
         renderNotifs()
-        try { localStorage.setItem('fluid-notifs', JSON.stringify(notifItems)) } catch (e) {}
+        saveNotifs()
       }
     })
 
     notifClear.addEventListener('click', () => {
       notifItems = []; unreadCount = 0
-      localStorage.removeItem('fluid-notifs')
+      store.delete('notifs')
       renderNotifs()
     })
 

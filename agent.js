@@ -1,42 +1,37 @@
 /* agent.js - Dual-brain agent: Talker + Worker, powered by Agentic */
 const Agent = (() => {
   let ai = null
+  let store = null
   const messages = []
   let workerRunning = false
   let workerAbort = null
   const taskQueue = []
 
-  // --- Chat persistence ---
-  function saveChat() {
-    try {
-      const toSave = messages.slice(-50) // Keep last 50 messages
-      localStorage.setItem('fluid-chat', JSON.stringify(toSave))
-    } catch (e) {}
+  // --- Chat persistence via agentic-store ---
+  async function saveChat() {
+    if (!store) return
+    await store.set('chat', messages.slice(-50))
   }
 
-  function loadChat() {
-    try {
-      const saved = localStorage.getItem('fluid-chat')
-      if (saved) {
-        const restored = JSON.parse(saved)
-        messages.push(...restored)
-        return restored
-      }
-    } catch (e) {}
+  async function loadChat() {
+    if (!store) return []
+    const saved = await store.get('chat')
+    if (saved && Array.isArray(saved)) {
+      messages.push(...saved)
+      return saved
+    }
     return []
   }
 
-  function restoreChatUI() {
+  async function restoreChatUI() {
     const container = document.getElementById('chat-messages')
     if (!container) return
-    const restored = loadChat()
+    const restored = await loadChat()
     if (restored.length === 0) return
-    // Show a separator
     const sep = document.createElement('div')
     sep.className = 'chat-separator'
     sep.textContent = 'Previous session'
     container.appendChild(sep)
-    // Render last 10 messages
     restored.slice(-10).forEach(m => {
       if (m.role === 'user' || m.role === 'assistant') {
         addBubble(m.role === 'assistant' ? 'agent' : 'user', m.content?.slice(0, 500) || '')
@@ -46,11 +41,12 @@ const Agent = (() => {
 
   const blackboard = { currentTask: null, directive: null, completedSteps: [], workerLog: [] }
 
-  function configure(provider, apiKey, model, baseUrl) {
+  function configure(provider, apiKey, model, baseUrl, _store) {
     const opts = { provider, apiKey, proxyUrl: 'https://proxy.link2web.site' }
     opts.model = model || (provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o')
     if (baseUrl) opts.baseUrl = baseUrl
     ai = new Agentic(opts)
+    if (_store) store = _store
   }
 
   function showActivity(text) {
