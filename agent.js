@@ -90,7 +90,10 @@ const Agent = (() => {
 
       // Fallback if streaming didn't populate
       if (!fullReply && result) {
-        fullReply = typeof result === 'string' ? result : (result.answer || result)
+        if (typeof result === 'string') fullReply = result
+        else if (result.answer) fullReply = result.answer
+        else if (result.content) fullReply = typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
+        else fullReply = String(result)
         bubble.textContent = fullReply
       }
 
