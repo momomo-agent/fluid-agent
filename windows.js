@@ -231,11 +231,30 @@ const WindowManager = (() => {
         const cmd = input.value
         appendOutput(output, `user@fluid:${Shell.getCwd()}$ ${cmd}`, '')
         if (cmd.trim()) {
-          const result = await Shell.execAsync(cmd)
-          if (result === '\x1bclear') {
-            output.innerHTML = ''
-          } else if (result) {
-            appendOutput(output, result, result.includes('not found') || result.includes('No such') ? 'error' : 'output')
+          // Built-in: say <text> — TTS via Voice
+          const sayMatch = cmd.trim().match(/^say\s+(.+)$/i)
+          if (sayMatch) {
+            const text = sayMatch[1]
+            if (Voice?.isEnabled()) {
+              appendOutput(output, `Speaking: "${text}"`, 'output')
+              Voice.speak(text)
+            } else {
+              appendOutput(output, 'Voice not enabled. Configure ElevenLabs in Settings.', 'error')
+            }
+          } else if (cmd.trim() === 'listen') {
+            if (Voice?.isEnabled()) {
+              appendOutput(output, 'Listening... (click mic or type "listen" again to stop)', 'output')
+              Voice.toggleListening()
+            } else {
+              appendOutput(output, 'Voice not enabled. Configure ElevenLabs in Settings.', 'error')
+            }
+          } else {
+            const result = await Shell.execAsync(cmd)
+            if (result === '\x1bclear') {
+              output.innerHTML = ''
+            } else if (result) {
+              appendOutput(output, result, result.includes('not found') || result.includes('No such') ? 'error' : 'output')
+            }
           }
         }
         promptEl.textContent = `user@fluid:${Shell.getCwd()}$ `
