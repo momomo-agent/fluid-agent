@@ -2,8 +2,9 @@
 const Agent = (() => {
   let ai = null
   const messages = []
+  let workerRunning = false
   let workerAbort = null
-  let planWinId = null // reuse single plan window
+  const taskQueue = [] // pending tasks
 
   const blackboard = { currentTask: null, directive: null, completedSteps: [], workerLog: [] }
 
@@ -61,22 +62,13 @@ const Agent = (() => {
     addBubble('user', userMessage)
     messages.push({ role: 'user', content: userMessage })
 
-    if (workerAbort && blackboard.currentTask) {
-      blackboard.directive = 'abort'
-      workerAbort.abort()
-      workerAbort = null
-      setWorkerStatus('')
-      showActivity('Task interrupted')
-    }
-
     const bubble = createStreamBubble()
     let fullReply = ''
 
     try {
       const os = getOsState()
-      const system = buildTalkerSystem(os)
       const result = await ai.think(userMessage, {
-        system,
+        system: buildTalkerSystem(os),
         stream: true,
         history: messages.slice(-21, -1),
         tools: [],
@@ -105,7 +97,17 @@ const Agent = (() => {
       const action = parseAction(fullReply)
       if (action?.action === 'execute' || action?.action === 'redirect') {
         bubble.textContent = action.reply || cleanReply(fullReply)
-        startWorker(action.task || userMessage, action.steps)
+        enqueueTask(action.task || userMessage, action.steps)
+      } else if (action?.action === 'steer') {
+        bubble.textContent = action.reply || cleanReply(fullReply)
+        blackboard.directive = { type: 'steer', instruction: action.instruction }
+        showActivity(`↪ Steering: ${action.instruction?.slice(0, 40)}`)
+      } else if (action?.action === 'abort') {
+        bubble.textContent = action.reply || cleanReply(fullReply)
+        if (workerAbort) { workerAbort.abort(); workerAbort = null }
+        taskQueue.length = 0
+        setWorkerStatus('')
+        showActivity('Tasks cleared')
       }
     } catch (err) {
       if (!fullReply) bubble.textContent = `Error: ${err.message}`
@@ -115,9 +117,12 @@ const Agent = (() => {
   function cleanReply(text) { return text.replace(/```json[\s\S]*?```/g, '').trim() }
 
   function buildTalkerSystem(os) {
+    const runningTasks = blackboard.currentTask?.status === 'running' ? [blackboard.currentTask] : []
+    const queuedCount = taskQueue.length
+
     let sys = `You are Fluid Agent, an AI that IS the operating system. Windows, files, and terminals are your expressions.
 
-You are always responsive. The user can interrupt you at any time.
+You are always responsive. The user can talk to you anytime, even while tasks are running.
 
 Current OS state:
 - Open windows: ${os.windows}
@@ -126,13 +131,27 @@ Current OS state:
 - Desktop files: ${JSON.stringify(os.desktop)}
 - Documents: ${JSON.stringify(os.documents)}
 `
-    if (blackboard.currentTask) {
-      sys += `\nActive task: ${blackboard.currentTask.goal} (${blackboard.currentTask.status})\nCompleted: ${blackboard.completedSteps.map(s => s.text).join(', ') || 'none'}\n`
+    if (runningTasks.length > 0) {
+      sys += `\nCurrently executing: ${runningTasks[0].goal} (${runningTasks[0].status})`
+      if (queuedCount > 0) sys += `\nQueued tasks: ${queuedCount}`
     }
-    sys += `\nWhen the user asks you to DO something (create files, write code, organize, build), respond conversationally AND include a JSON action block:
+    sys += `\nCompleted recently: ${blackboard.completedSteps.map(s => s.text).join(', ') || 'none'}`
 
+    sys += `\n\nYou can respond with these JSON action blocks:
+
+1. NEW TASK — queue a new task (runs after current finishes):
 \`\`\`json
 {"action": "execute", "reply": "your reply", "task": "what to do", "steps": ["step 1", "step 2"]}
+\`\`\`
+
+2. STEER — change direction of the currently running task:
+\`\`\`json
+{"action": "steer", "reply": "your reply", "instruction": "new direction for the worker"}
+\`\`\`
+
+3. ABORT — stop everything (current task + queue):
+\`\`\`json
+{"action": "abort", "reply": "your reply"}
 \`\`\`
 
 For pure conversation, just reply normally. Keep replies concise.`
@@ -145,9 +164,23 @@ For pure conversation, just reply normally. Keep replies concise.`
     try { return JSON.parse(m[1]) } catch { return null }
   }
 
-  async function startWorker(taskDescription, plannedSteps) {
-    if (workerAbort) { workerAbort.abort(); workerAbort = null }
+  function enqueueTask(taskDescription, steps) {
+    taskQueue.push({ taskDescription, steps })
+    if (!workerRunning) drainQueue()
+    else showActivity(`Queued: ${taskDescription.slice(0, 40)}…`)
+  }
 
+  async function drainQueue() {
+    while (taskQueue.length > 0) {
+      const { taskDescription, steps } = taskQueue.shift()
+      await startWorker(taskDescription, steps)
+    }
+    workerRunning = false
+    setWorkerStatus('')
+  }
+
+  async function startWorker(taskDescription, plannedSteps) {
+    workerRunning = true
     const abort = new AbortController()
     workerAbort = abort
     // Use Task Manager instead of Plan window
@@ -212,13 +245,19 @@ For pure conversation, just reply normally. Keep replies concise.`
         blackboard.workerLog.push({ tool: name, params, time: Date.now() })
         task.log.push(`${name}: ${JSON.stringify(params).slice(0, 60)}`)
 
+        // Check for steer directive — inject into next system prompt
+        if (blackboard.directive?.type === 'steer') {
+          task.log.push(`↪ Steered: ${blackboard.directive.instruction}`)
+          blackboard.directive = null // consumed
+        }
+
         const result = toolHandlers[name](params)
         WindowManager.updateTask(task)
 
         if (result.done) {
           task.status = 'done'
           blackboard.currentTask.status = 'done'
-          setWorkerStatus('✅ Done')
+          setWorkerStatus(taskQueue.length > 0 ? `⏳ ${taskQueue.length} queued` : '✅ Done')
           steps.forEach(s => { s.status = 'done' })
           WindowManager.updateTask(task)
         }
@@ -228,13 +267,15 @@ For pure conversation, just reply normally. Keep replies concise.`
 
     try {
       const os = getOsState()
+      const steerNote = blackboard.directive?.type === 'steer' ? `\n\nIMPORTANT DIRECTION CHANGE: ${blackboard.directive.instruction}\nAdjust your execution plan accordingly.` : ''
+      if (steerNote) blackboard.directive = null
       await ai.think(taskDescription, {
         system: `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
 
 Current OS state:
 - Open windows: ${os.windows}
 - Working directory: ${os.cwd}
-- Desktop files: ${JSON.stringify(os.desktop)}
+- Desktop files: ${JSON.stringify(os.desktop)}${steerNote}
 
 Execute efficiently. Use list_windows to see what's open. Use close_window/focus_window to manage windows.
 When finished, call the done tool with a summary.`,
