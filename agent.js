@@ -12,12 +12,12 @@ const Agent = (() => {
     workerLog: [],
   }
 
-  function configure(provider, apiKey) {
-    ai = new Agentic({
-      provider,
-      apiKey,
-      model: provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o',
-    })
+  function configure(provider, apiKey, model, baseUrl) {
+    const opts = { provider, apiKey }
+    if (model) opts.model = model
+    else opts.model = provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o'
+    if (baseUrl) opts.baseUrl = baseUrl
+    ai = new Agentic(opts)
   }
 
   // ── Activity Stream ──
