@@ -266,18 +266,11 @@ Current directory: ${Shell.getCwd()}
 Execute efficiently. Create files, open windows, run commands as needed.
 When finished, call the done tool with a summary.`
 
-      // Use agenticAsk directly for tool loop support (ai.think doesn't support tool loops)
-      const core = AgenticCore
-      const ask = core.agenticAsk
-
-      await ask(taskDescription, {
-        provider: ai._opts.provider,
-        apiKey: ai._opts.apiKey,
-        model: ai._opts.model,
+      // All LLM calls go through Agentic
+      await ai.think(taskDescription, {
         system: workerSystem,
         stream: false,
         tools,
-        signal: abort.signal,
       })
 
       if (blackboard.currentTask && blackboard.currentTask.status !== 'done') {

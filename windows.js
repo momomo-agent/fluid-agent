@@ -5,13 +5,19 @@ const WindowManager = (() => {
   const windows = new Map()
   const area = () => document.getElementById('desktop-area')
 
+  let cascadeOffset = 0
+
   function create({ type, title, x, y, width, height, data }) {
     const id = 'win-' + nextId++
     const w = document.createElement('div')
     w.className = 'window'
     w.id = id
-    w.style.left = (x || 40 + Math.random() * 100) + 'px'
-    w.style.top = (y || 40 + Math.random() * 80) + 'px'
+    // Cascade windows so they don't stack exactly
+    const cx = (x || 60) + cascadeOffset * 30
+    const cy = (y || 40) + cascadeOffset * 30
+    cascadeOffset = (cascadeOffset + 1) % 6
+    w.style.left = cx + 'px'
+    w.style.top = cy + 'px'
     w.style.width = (width || 500) + 'px'
     w.style.height = (height || 350) + 'px'
     w.style.zIndex = ++topZ

@@ -32,6 +32,7 @@
 
   function boot(provider, apiKey) {
     Agent.configure(provider, apiKey)
+    document.getElementById('app').style.display = 'flex'
 
     // Open initial Finder window
     WindowManager.openFinder('/home/user/Desktop')
