@@ -121,16 +121,76 @@
 
     // --- Task status in header ---
     const taskStatusEl = document.getElementById('task-status')
+    const taskHoverPanel = document.getElementById('task-hover-panel')
+    const taskStatusWrap = document.getElementById('task-status-wrap')
+    let hoverTimeout = null
+
+    taskStatusWrap.addEventListener('mouseenter', () => {
+      clearTimeout(hoverTimeout)
+      updateTaskHoverPanel()
+      taskHoverPanel.classList.remove('hidden')
+    })
+    taskStatusWrap.addEventListener('mouseleave', () => {
+      hoverTimeout = setTimeout(() => taskHoverPanel.classList.add('hidden'), 200)
+    })
+    taskHoverPanel.addEventListener('mouseenter', () => clearTimeout(hoverTimeout))
+    taskHoverPanel.addEventListener('mouseleave', () => {
+      hoverTimeout = setTimeout(() => taskHoverPanel.classList.add('hidden'), 200)
+    })
+
+    function updateTaskHoverPanel() {
+      const bb = Agent.blackboard
+      const ct = bb.currentTask
+      const queued = Agent.getTaskQueue ? Agent.getTaskQueue() : []
+      let html = '<div class="thp-title">Tasks</div>'
+
+      if (ct && ct.status === 'running') {
+        const steps = ct.steps || []
+        html += '<div class="thp-task active">'
+        html += `<div class="thp-task-name">${ct.goal || 'Working...'}</div>`
+        if (steps.length > 0) {
+          html += '<div class="thp-steps">'
+          steps.forEach(s => {
+            const cls = s.status === 'done' ? 'done' : s.status === 'running' ? 'running' : 'pending'
+            html += `<div class="thp-step ${cls}">${s.text || s}</div>`
+          })
+          html += '</div>'
+        }
+        html += '</div>'
+      }
+
+      if (queued.length > 0) {
+        html += `<div class="thp-queue">${queued.length} task${queued.length > 1 ? 's' : ''} queued</div>`
+        queued.forEach(q => {
+          html += `<div class="thp-task"><div class="thp-task-name">${q.taskDescription?.slice(0, 60) || 'Queued'}</div></div>`
+        })
+      }
+
+      if (!ct?.status?.match?.(/running/) && queued.length === 0) {
+        html += '<div class="thp-empty">No active tasks</div>'
+      }
+
+      taskHoverPanel.innerHTML = html
+    }
+
     setInterval(() => {
       const bb = Agent.blackboard
       if (bb.currentTask && bb.currentTask.status === 'running') {
-        const goal = bb.currentTask.goal?.slice(0, 40) || 'Working...'
-        const queued = Agent.blackboard.workerLog?.length || 0
-        const queueText = queued > 0 ? ` · ${queued} queued` : ''
-        taskStatusEl.innerHTML = `<div class="spinner"></div> ${goal}${queueText}`
+        const goal = bb.currentTask.goal?.slice(0, 30) || 'Working...'
+        const steps = bb.currentTask.steps || []
+        const doneCount = steps.filter(s => s.status === 'done').length
+        const total = steps.length
+        const queued = Agent.getTaskQueue ? Agent.getTaskQueue().length : 0
+        const queueText = queued > 0 ? ` · +${queued}` : ''
+        const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0
+        const progressBar = total > 0 ? `<div class="task-progress"><div class="task-progress-fill" style="width:${pct}%"></div></div>` : ''
+        const stepText = total > 0 ? `${doneCount}/${total}` : ''
+        taskStatusEl.innerHTML = `<div class="spinner"></div> ${goal} ${stepText}${queueText} ${progressBar}`
       } else {
         taskStatusEl.innerHTML = ''
       }
+      // Update hover panel if visible
+      if (!taskHoverPanel.classList.contains('hidden')) updateTaskHoverPanel()
     }, 1000)
 
     // --- Keyboard shortcuts ---

@@ -471,15 +471,67 @@ select.settings-input { appearance: none; cursor: pointer; }
 #header-right {
   display: flex; align-items: center; gap: 10px; margin-left: auto;
 }
+#task-status-wrap {
+  position: relative;
+}
 #task-status {
-  font-size: 11px; color: var(--accent); display: flex; align-items: center; gap: 4px;
-  max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 11px; color: rgba(0,0,0,0.55); display: flex; align-items: center; gap: 5px;
+  max-width: 300px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  cursor: default; padding: 2px 6px; border-radius: 6px;
+  transition: background 0.15s;
 }
 #task-status:empty { display: none; }
+#task-status:hover { background: rgba(0,0,0,0.06); }
 #task-status .spinner {
-  width: 10px; height: 10px; border: 2px solid var(--accent);
+  width: 10px; height: 10px; border: 1.5px solid var(--accent);
   border-top-color: transparent; border-radius: 50%;
   animation: spin 0.8s linear infinite; flex-shrink: 0;
+}
+#task-status .task-progress {
+  width: 40px; height: 3px; border-radius: 2px; background: rgba(0,0,0,0.08); overflow: hidden; flex-shrink: 0;
+}
+#task-status .task-progress-fill {
+  height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s ease;
+}
+#task-hover-panel {
+  position: absolute; top: 100%; right: 0; margin-top: 4px;
+  width: 320px; max-height: 400px; overflow-y: auto;
+  background: rgba(255,255,255,0.92); backdrop-filter: blur(20px) saturate(1.8);
+  border: 1px solid rgba(0,0,0,0.08); border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  padding: 10px; z-index: 10001;
+  font-size: 12px; color: var(--text);
+}
+#task-hover-panel.hidden { display: none; }
+#task-hover-panel .thp-title {
+  font-size: 11px; font-weight: 600; color: rgba(0,0,0,0.4); text-transform: uppercase;
+  letter-spacing: 0.04em; margin-bottom: 8px;
+}
+#task-hover-panel .thp-task {
+  padding: 6px 8px; border-radius: 6px; margin-bottom: 4px;
+  background: rgba(0,0,0,0.03);
+}
+#task-hover-panel .thp-task.active { background: rgba(59,130,246,0.08); }
+#task-hover-panel .thp-task-name {
+  font-weight: 500; font-size: 12px; margin-bottom: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#task-hover-panel .thp-steps {
+  display: flex; flex-direction: column; gap: 2px;
+}
+#task-hover-panel .thp-step {
+  font-size: 11px; color: rgba(0,0,0,0.5); display: flex; align-items: center; gap: 4px;
+}
+#task-hover-panel .thp-step.done { color: rgba(0,0,0,0.35); }
+#task-hover-panel .thp-step.done::before { content: '✓'; color: #22c55e; font-size: 10px; }
+#task-hover-panel .thp-step.running::before { content: '●'; color: var(--accent); font-size: 8px; }
+#task-hover-panel .thp-step.pending::before { content: '○'; color: rgba(0,0,0,0.2); font-size: 8px; }
+#task-hover-panel .thp-queue {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.06);
+  font-size: 11px; color: rgba(0,0,0,0.35);
+}
+#task-hover-panel .thp-empty {
+  text-align: center; padding: 16px 0; color: rgba(0,0,0,0.3); font-size: 12px;
 }
 #clock {
   font-size: 11px; color: rgba(0,0,0,0.45); font-variant-numeric: tabular-nums;

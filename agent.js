@@ -926,5 +926,5 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
     setTimeout(() => setWorkerStatus(''), 3000)
   }
 
-  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills }
+  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getTaskQueue: () => taskQueue }
 })() 
