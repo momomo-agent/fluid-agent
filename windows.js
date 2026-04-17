@@ -440,20 +440,27 @@ const WindowManager = (() => {
   }
 
   // ── Helpers ──
+  // Standard window sizes
+  const SIZE = {
+    small:  { width: 420, height: 360 },
+    medium: { width: 560, height: 400 },
+    large:  { width: 640, height: 460 },
+  }
+
   function openFinder(path) {
-    return create({ type: 'finder', title: path.split('/').pop() || '/', x: 40, y: 30, width: 520, height: 380, data: { path } })
+    return create({ type: 'finder', title: path.split('/').pop() || '/', ...SIZE.medium, data: { path } })
   }
 
   function openTerminal() {
-    return create({ type: 'terminal', title: 'Terminal', x: 200, y: 100, width: 560, height: 360 })
+    return create({ type: 'terminal', title: 'Terminal', ...SIZE.medium })
   }
 
   function openEditor(path) {
-    return create({ type: 'editor', title: path.split('/').pop(), x: 120, y: 60, width: 500, height: 400, data: { path } })
+    return create({ type: 'editor', title: path.split('/').pop(), ...SIZE.medium, data: { path } })
   }
 
   function openPlan(goal, steps) {
-    return create({ type: 'plan', title: 'Plan', x: 300, y: 50, width: 400, height: 320, data: { goal, steps } })
+    return create({ type: 'plan', title: 'Plan', ...SIZE.small, data: { goal, steps } })
   }
 
   let taskManagerId = null
@@ -464,7 +471,7 @@ const WindowManager = (() => {
       focus(taskManagerId)
       return taskManagerId
     }
-    taskManagerId = create({ type: 'taskmanager', title: 'Task Manager', x: 300, y: 50, width: 520, height: 380 })
+    taskManagerId = create({ type: 'taskmanager', title: 'Task Manager', ...SIZE.medium })
     renderTaskManager()
     return taskManagerId
   }
@@ -575,7 +582,7 @@ const WindowManager = (() => {
   let settingsId = null
   function openSettings() {
     if (settingsId && windows.has(settingsId)) { focus(settingsId); return settingsId }
-    settingsId = create({ type: 'settings', title: 'Settings', x: 150, y: 80, width: 420, height: 380 })
+    settingsId = create({ type: 'settings', title: 'Settings', ...SIZE.small })
     return settingsId
   }
 
@@ -754,7 +761,7 @@ const WindowManager = (() => {
 
   function openMusic() {
     if (musicId && windows.has(musicId)) { focus(musicId); return musicId }
-    musicId = create({ type: 'music', title: 'Music', x: 200, y: 100, width: 340, height: 420 })
+    musicId = create({ type: 'music', title: 'Music', ...SIZE.small })
     return musicId
   }
 
@@ -843,7 +850,7 @@ const WindowManager = (() => {
 
   // --- Video Player ---
   function openVideo(url, title) {
-    const id = create({ type: 'video', title: title || 'Video Player', x: 180, y: 80, width: 560, height: 400, data: { url: url || '' } })
+    const id = create({ type: 'video', title: title || 'Video Player', ...SIZE.medium, data: { url: url || '' } })
     return id
   }
 
@@ -886,7 +893,7 @@ const WindowManager = (() => {
 
   // --- Browser ---
   function openBrowser(url) {
-    const id = create({ type: 'browser', title: 'Browser', x: 160, y: 60, width: 640, height: 460, data: { url: url || '' } })
+    const id = create({ type: 'browser', title: 'Browser', ...SIZE.large, data: { url: url || '' } })
     return id
   }
 
@@ -943,7 +950,7 @@ const WindowManager = (() => {
 
   function openMap(lat, lng, zoom) {
     if (mapId && windows.has(mapId)) { focus(mapId); return mapId }
-    mapId = create({ type: 'map', title: 'Map', x: 120, y: 50, width: 560, height: 420, data: { lat: lat || 39.9042, lng: lng || 116.4074, zoom: zoom || 12, markers: [], route: null } })
+    mapId = create({ type: 'map', title: 'Map', ...SIZE.medium, data: { lat: lat || 39.9042, lng: lng || 116.4074, zoom: zoom || 12, markers: [], route: null } })
     updateDock()
     return mapId
   }
@@ -1195,7 +1202,7 @@ document.getElementById('search').addEventListener('keydown', function(e) {
     }
     const app = installedApps.get(name)
     if (!app) return null
-    const id = create({ type: 'app', title: name, x: 150, y: 80, width: app.width, height: app.height, data: { name, html: app.html, css: app.css, js: app.js } })
+    const id = create({ type: 'app', title: name, width: app.width || SIZE.small.width, height: app.height || SIZE.small.height, data: { name, html: app.html, css: app.css, js: app.js } })
     updateDock()
     return id
   }
