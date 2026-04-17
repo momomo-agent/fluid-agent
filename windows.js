@@ -906,6 +906,23 @@ const WindowManager = (() => {
     if (!container) return
     container.innerHTML = ''
 
+    // Update running dots on pinned dock items
+    const pinnedItems = document.querySelectorAll('.dock-pinned .dock-item')
+    const runningTypes = new Set()
+    windows.forEach(w => { runningTypes.add(w.type) })
+    pinnedItems.forEach(item => {
+      const app = item.dataset.app
+      item.querySelector('.dock-running-dot')?.remove()
+      // Map dock app names to window types
+      const typeMap = { finder: 'finder', terminal: 'terminal', browser: 'browser', music: 'music', video: 'video', map: 'map', settings: 'settings' }
+      const wType = typeMap[app]
+      if (wType && runningTypes.has(wType)) {
+        const dot = document.createElement('div')
+        dot.className = 'dock-running-dot'
+        item.appendChild(dot)
+      }
+    })
+
     // Show installed generative apps in dock
     for (const [name, app] of installedApps) {
       const item = document.createElement('div')
@@ -926,7 +943,7 @@ const WindowManager = (() => {
 
     // Show other running windows
     windows.forEach((w, id) => {
-      if (['finder', 'terminal', 'settings', 'music', 'video', 'browser', 'app'].includes(w.type) && !w.minimized) return
+      if (['finder', 'terminal', 'settings', 'music', 'video', 'browser', 'map', 'app'].includes(w.type) && !w.minimized) return
       const item = document.createElement('div')
       item.className = 'dock-item' + (w.minimized ? ' minimized' : '')
       item.title = w.el.querySelector('.window-title')?.textContent || w.type
