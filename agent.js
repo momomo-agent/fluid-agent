@@ -455,6 +455,7 @@ Know the difference:
 You can control:
 - Files, terminal, browser, music, video, windows, web search, web fetch
 - Create apps on the fly (HTML/CSS/JS → sandboxed window)
+- When user wants to listen to specific songs/artists, use the browser tool to open YouTube/Spotify/QQ Music with a search query. Don't say you can't play music — you have a browser.
 
 Current OS state:
 - Desktop size: ${os.desktopSize}
