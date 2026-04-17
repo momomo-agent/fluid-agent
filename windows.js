@@ -180,6 +180,7 @@ const WindowManager = (() => {
       case 'music': renderMusic(w, body); break
       case 'video': renderVideo(w, body); break
       case 'browser': renderBrowser(w, body); break
+      case 'map': renderMap(w, body); break
       case 'app': renderApp(w, body); break
     }
   }
@@ -862,6 +863,70 @@ const WindowManager = (() => {
     })
   }
 
+  // ── Map ──
+  let mapId = null
+
+  function openMap(lat, lng, zoom) {
+    if (mapId && windows.has(mapId)) { focus(mapId); return mapId }
+    mapId = create({ type: 'map', title: 'Map', x: 120, y: 50, width: 560, height: 420, data: { lat: lat || 39.9042, lng: lng || 116.4074, zoom: zoom || 12 } })
+    updateDock()
+    return mapId
+  }
+
+  function renderMap(w, body) {
+    const { lat, lng, zoom } = w.data || { lat: 39.9042, lng: 116.4074, zoom: 12 }
+    const doc = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #map { width: 100%; height: 100%; }
+.search-bar { position: absolute; top: 10px; left: 50px; right: 50px; z-index: 1000; }
+.search-bar input { width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(22,27,38,0.9); color: #e2e8f0; font-size: 13px; backdrop-filter: blur(8px); outline: none; }
+.search-bar input:focus { border-color: #60a5fa; }
+.coords { position: absolute; bottom: 8px; left: 8px; z-index: 1000; background: rgba(22,27,38,0.85); color: #94a3b8; padding: 4px 8px; border-radius: 6px; font-size: 11px; backdrop-filter: blur(8px); }
+</style></head><body>
+<div class="search-bar"><input id="search" placeholder="Search location..." /></div>
+<div id="map"></div>
+<div class="coords" id="coords">${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
+<script>
+var map = L.map('map', { zoomControl: false }).setView([${lat}, ${lng}], ${zoom});
+L.control.zoom({ position: 'topright' }).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap',
+  maxZoom: 19
+}).addTo(map);
+var marker = L.marker([${lat}, ${lng}]).addTo(map);
+map.on('mousemove', function(e) {
+  document.getElementById('coords').textContent = e.latlng.lat.toFixed(4) + ', ' + e.latlng.lng.toFixed(4);
+});
+map.on('click', function(e) {
+  marker.setLatLng(e.latlng);
+});
+document.getElementById('search').addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter') return;
+  var q = this.value.trim();
+  if (!q) return;
+  fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(q))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && data.length > 0) {
+        var lat = parseFloat(data[0].lat), lon = parseFloat(data[0].lon);
+        map.setView([lat, lon], 14);
+        marker.setLatLng([lat, lon]);
+        marker.bindPopup(data[0].display_name).openPopup();
+      }
+    });
+});
+<\/script></body></html>`
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'width:100%;height:100%;border:none'
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin')
+    iframe.srcdoc = doc
+    body.innerHTML = ''
+    body.appendChild(iframe)
+  }
+
   // Agent browser control
   window.addEventListener('browser-control', (e) => {
     const { action, url } = e.detail
@@ -920,7 +985,7 @@ const WindowManager = (() => {
 
   function openApp(name, html, css, js, opts = {}) {
     if (html) {
-      installedApps.set(name, { html, css: css || '', js: js || '', icon: opts.icon || '💻', width: opts.width || 420, height: opts.height || 360 })
+      installedApps.set(name, { html, css: css || '', js: js || '', icon: opts.icon || '💻', width: opts.width || 420, height: opts.height || 360, description: opts.description || '' })
       saveApps()
     }
     const app = installedApps.get(name)
@@ -950,7 +1015,15 @@ ${css}
   }
 
   function getInstalledApps() {
-    return Array.from(installedApps.entries()).map(([name, app]) => ({ name, icon: app.icon }))
+    return Array.from(installedApps.entries()).map(([name, app]) => ({ name, icon: app.icon, description: app.description || '' }))
+  }
+
+  function uninstallApp(name) {
+    if (!installedApps.has(name)) return false
+    installedApps.delete(name)
+    saveApps()
+    updateDock()
+    return true
   }
 
   // Update dock when windows change
@@ -1004,6 +1077,7 @@ ${css}
           case 'editor': if (win.data?.path && VFS.isFile(win.data.path)) id = create({ type: 'editor', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
           case 'settings': id = create({ type: 'settings', title: 'Settings', x: win.x, y: win.y, width: win.width, height: win.height }); settingsId = id; break
           case 'browser': id = create({ type: 'browser', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
+          case 'map': id = create({ type: 'map', title: 'Map', x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); mapId = id; break
           case 'music': id = create({ type: 'music', title: 'Music', x: win.x, y: win.y, width: win.width, height: win.height }); musicId = id; break
           case 'app': if (win.data?.name && installedApps.has(win.data.name)) id = create({ type: 'app', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
           // Skip transient types: plan, taskmanager, video, image
@@ -1020,5 +1094,5 @@ ${css}
   // Hook into drag/resize end to save session
   document.addEventListener('mouseup', () => { if (_sessionAi) saveSession() })
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()

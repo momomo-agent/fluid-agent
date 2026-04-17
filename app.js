@@ -24,6 +24,7 @@
     if (ai) {
       await VFS.init(ai)
       await WindowManager.loadApps(ai)
+      await Agent.loadSkills()
     } else {
       VFS.initDefaults()
     }
@@ -95,6 +96,7 @@
           case 'terminal': WindowManager.openTerminal(); break
           case 'music': WindowManager.openMusic(); break
           case 'browser': WindowManager.openBrowser(); break
+          case 'map': WindowManager.openMap(); break
           case 'video': WindowManager.openVideo(); break
           case 'settings': WindowManager.openSettings(); break
         }

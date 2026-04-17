@@ -1,13 +1,16 @@
 # Fluid Agent — Roadmap
 
 ## Phase 1: Claw + 记忆（当前）
-- [ ] agent 记忆系统：MEMORY.md / lessons 存在 VFS，Finder 可见
-- [ ] Skill 管理：`/system/skills/` 目录，agent 自己读写
-- [ ] Tool 管理：agent 自己写脚本到 `/system/tools/`，自进化
-- [ ] 对话上下文持续化（长期记忆，不只是截断）
+- [x] agent 记忆系统：MEMORY.md / lessons 存在 VFS，Finder 可见
+- [x] Skill 管理：`/system/skills/` 目录，agent 自己读写
+- [x] Tool 管理：`/system/tools/` 目录结构
+- [x] agent 主动记忆：每次对话后自动判断是否需要记忆，写入 MEMORY.md
+- [x] 对话上下文持续化：超过 40 条自动摘要压缩，写入 context.md，保留长期记忆
+- [ ] Skill/Tool 自进化闭环：agent 自己写 skill → 注册 → 下次用
 
 ## Phase 2: UI 打磨
-- [ ] Settings 页面完善
+- [x] Settings 页面（provider/key/model/baseUrl/voice）
+- [x] 地图 app（Leaflet，搜索，坐标显示）
 - [ ] 整体视觉打磨，demo 级体验
 - [ ] 交互细节优化
 
@@ -28,4 +31,4 @@
 
 ---
 
-*2026-04-16 确立*
+*2026-04-16 确立，4/17 更新*

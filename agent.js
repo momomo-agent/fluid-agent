@@ -7,9 +7,12 @@ const Agent = (() => {
   const taskQueue = []
 
   // --- Chat persistence via agentic glue ---
+  const MAX_MESSAGES = 50
+  const SUMMARIZE_THRESHOLD = 40
+
   async function saveChat() {
     if (!ai) return
-    await ai.save('chat', messages.slice(-50))
+    await ai.save('chat', messages.slice(-MAX_MESSAGES))
   }
 
   async function loadChat() {
@@ -20,6 +23,40 @@ const Agent = (() => {
       return saved
     }
     return []
+  }
+
+  async function summarizeOldMessages() {
+    if (!ai || messages.length < SUMMARIZE_THRESHOLD) return
+    // Take the oldest messages that will be trimmed
+    const toSummarize = messages.slice(0, messages.length - 20)
+    if (toSummarize.length < 10) return
+
+    try {
+      const chatText = toSummarize.map(m => `${m.role}: ${(m.content || '').slice(0, 200)}`).join('\n')
+      const resp = await ai.chat(
+        `Summarize this conversation history into key facts, decisions, and context that should be preserved:\n\n${chatText}`,
+        {
+          system: 'You are a memory summarizer. Extract the essential facts, user preferences, decisions made, and important context from this conversation. Output a concise bullet-point summary. Focus on what would be useful for future conversations.',
+          stream: false,
+        }
+      )
+      const summary = resp?.content || resp?.text || (typeof resp === 'string' ? resp : '')
+      if (!summary) return
+
+      // Write summary to context.md in VFS
+      const ctxPath = '/system/memory/context.md'
+      let ctx = VFS.isFile(ctxPath) ? VFS.readFile(ctxPath) : '# Session Context\n'
+      ctx += `\n## Summary (${new Date().toLocaleDateString()})\n${summary}\n`
+      VFS.writeFile(ctxPath, ctx)
+
+      // Trim messages: keep only recent ones + inject summary as system context
+      const recent = messages.slice(-20)
+      messages.length = 0
+      messages.push({ role: 'assistant', content: `[Previous conversation summary]\n${summary}` })
+      messages.push(...recent)
+      await saveChat()
+      showActivity('🧠 Context compressed')
+    } catch (e) { /* silent fail */ }
   }
 
   async function restoreChatUI() {
@@ -40,11 +77,74 @@ const Agent = (() => {
 
   const blackboard = { currentTask: null, directive: null, completedSteps: [], workerLog: [] }
 
+  // --- Skill System: self-evolving tools ---
+  const customSkills = new Map() // name → { description, schema, handler_js, icon }
+
+  async function loadSkills() {
+    const skillsDir = '/system/skills'
+    if (!VFS.isDir(skillsDir)) return
+    const entries = VFS.ls(skillsDir) || []
+    for (const entry of entries) {
+      if (entry.type !== 'dir') continue
+      const skillPath = `${skillsDir}/${entry.name}/SKILL.md`
+      if (!VFS.isFile(skillPath)) continue
+      try {
+        const md = VFS.readFile(skillPath)
+        const parsed = parseSkillMd(md)
+        if (parsed) customSkills.set(entry.name, parsed)
+      } catch (e) { /* skip broken skills */ }
+    }
+    if (customSkills.size > 0) showActivity(`🧩 Loaded ${customSkills.size} skill${customSkills.size > 1 ? 's' : ''}`)
+  }
+
+  function parseSkillMd(md) {
+    // Parse SKILL.md frontmatter-style: name, description, icon, schema (JSON), handler (JS)
+    const desc = md.match(/^## Description\n([\s\S]*?)(?=\n##|$)/m)?.[1]?.trim()
+    const icon = md.match(/^## Icon\n(.+)/m)?.[1]?.trim() || '🧩'
+    const schemaBlock = md.match(/^## Schema\n```json\n([\s\S]*?)```/m)?.[1]?.trim()
+    const handlerBlock = md.match(/^## Handler\n```js\n([\s\S]*?)```/m)?.[1]?.trim()
+    if (!desc || !handlerBlock) return null
+    let schema = { type: 'object', properties: {} }
+    if (schemaBlock) try { schema = JSON.parse(schemaBlock) } catch {}
+    return { description: desc, schema, handler_js: handlerBlock, icon }
+  }
+
+  function buildSkillHandler(handlerJs) {
+    // Create a sandboxed handler function from JS string
+    // Handler has access to: VFS, Shell, WindowManager, params
+    try {
+      return new Function('params', 'VFS', 'Shell', 'WindowManager', handlerJs)
+    } catch (e) {
+      return () => ({ error: `Skill handler error: ${e.message}` })
+    }
+  }
+
+  function getSkillTools() {
+    // Convert custom skills into tool definitions + handlers
+    const tools = {}
+    const handlers = {}
+    for (const [name, skill] of customSkills) {
+      tools[`skill_${name}`] = { desc: `[Skill] ${skill.description}`, schema: skill.schema }
+      handlers[`skill_${name}`] = (params) => {
+        try {
+          const fn = buildSkillHandler(skill.handler_js)
+          const result = fn(params, VFS, Shell, WindowManager)
+          showActivity(`🧩 ${name}: done`)
+          return result || { success: true }
+        } catch (e) {
+          return { error: e.message }
+        }
+      }
+    }
+    return { tools, handlers }
+  }
+
   function configure(provider, apiKey, model, baseUrl) {
     const opts = { provider, apiKey, proxyUrl: 'https://proxy.link2web.site', store: { name: 'fluid-agent' } }
     opts.model = model || (provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o')
     if (baseUrl) opts.baseUrl = baseUrl
-    ai = new Agentic(opts)
+    const AgenticClass = typeof Agentic === 'function' ? Agentic : Agentic.Agentic
+    ai = new AgenticClass(opts)
   }
 
   function showActivity(text) {
@@ -89,6 +189,7 @@ const Agent = (() => {
       desktop: VFS.ls('/home/user/Desktop')?.map(f => f.name) || [],
       documents: VFS.ls('/home/user/Documents')?.map(f => f.name) || [],
       installedApps: apps.length > 0 ? apps.map(a => `${a.icon} ${a.name}`).join(', ') : 'none',
+      skills: customSkills.size > 0 ? Array.from(customSkills.entries()).map(([n, s]) => `${s.icon} ${n}`).join(', ') : 'none',
     }
   }
 
@@ -168,6 +269,47 @@ const Agent = (() => {
     // Speak the reply if voice is enabled
     const spokenText = bubble.textContent
     if (spokenText && Voice?.isEnabled()) Voice.speak(spokenText)
+
+    // Auto-memory: after every conversation, check if something is worth remembering
+    if (ai && fullReply && messages.length > 2) {
+      autoMemory(userMessage, fullReply).catch(() => {})
+    }
+
+    // Auto-summarize when messages get long
+    if (messages.length >= SUMMARIZE_THRESHOLD) {
+      summarizeOldMessages().catch(() => {})
+    }
+  }
+
+  async function autoMemory(userMsg, agentReply) {
+    if (!ai) return
+    try {
+      const memPath = '/system/memory/MEMORY.md'
+      const currentMem = VFS.isFile(memPath) ? VFS.readFile(memPath) : ''
+      const resp = await ai.chat(
+        `User said: "${userMsg.slice(0, 300)}"\nYou replied: "${agentReply.slice(0, 300)}"\n\nCurrent memory:\n${currentMem.slice(0, 500)}`,
+        {
+          system: `You are the memory system of Fluid Agent OS. Decide if this exchange contains something worth remembering long-term: user preferences, facts about the user, project context, important decisions, or lessons learned.\n\nRespond with JSON only:\n{"remember": false}\nor\n{"remember": true, "section": "About You|Preferences|Projects|Lessons Learned", "entry": "concise fact to remember"}\n\nBe selective. Only remember genuinely useful facts. Don't remember greetings, small talk, or transient requests.`,
+          stream: false,
+        }
+      )
+      const text = resp?.content || resp?.text || (typeof resp === 'string' ? resp : '')
+      const jsonMatch = text.match(/\{[\s\S]*?\}/)
+      if (!jsonMatch) return
+      const decision = JSON.parse(jsonMatch[0])
+      if (!decision.remember || !decision.entry) return
+
+      let mem = VFS.isFile(memPath) ? VFS.readFile(memPath) : '# Agent Memory\n'
+      const section = decision.section || 'Lessons Learned'
+      const header = `## ${section}`
+      if (mem.includes(header)) {
+        mem = mem.replace(header, `${header}\n- ${decision.entry}`)
+      } else {
+        mem += `\n${header}\n- ${decision.entry}\n`
+      }
+      VFS.writeFile(memPath, mem)
+      showActivity('💾 Memory updated')
+    } catch (e) { /* silent fail */ }
   }
 
   function cleanReply(text) { return text.replace(/```json[\s\S]*?```/g, '').trim() }
@@ -205,6 +347,7 @@ Current OS state:
 - Desktop files: ${JSON.stringify(os.desktop)}
 - Documents: ${JSON.stringify(os.documents)}
 - Installed apps: ${os.installedApps}
+- Installed skills: ${os.skills}
 `
     if (runningTasks.length > 0) {
       sys += `\nCurrently executing: ${runningTasks[0].goal} (${runningTasks[0].status})`
@@ -234,7 +377,10 @@ Current OS state:
 {"action": "remember", "reply": "your reply", "memory": "what to remember", "section": "About You|Preferences|Lessons Learned"}
 \`\`\`
 Use this when you learn something important about the user, their preferences, or a lesson. Your memory persists across sessions.
-\`\`\`
+
+You also have SKILLS — reusable tools you've created. When executing tasks, you can use existing skills or create new ones.
+Installed skills: ${os.skills}
+To create a skill during execution, use the create_skill tool. Skills auto-load on next session.
 
 For conversation, questions, opinions, brainstorming — just reply normally. No action blocks needed. Be natural, concise, and have personality.`
     return sys
@@ -308,6 +454,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         return { success: true }
       },
       open_browser: ({ url }) => { WindowManager.openBrowser(url); showActivity(`🌐 Browser: ${url || 'home'}`); return { success: true } },
+      open_map: ({ lat, lng, zoom }) => { WindowManager.openMap(lat, lng, zoom); showActivity(`🗺️ Map: ${lat || 'default'}, ${lng || ''}`); return { success: true } },
       browser_navigate: ({ url }) => {
         window.dispatchEvent(new CustomEvent('browser-control', { detail: { action: 'navigate', url } }))
         showActivity(`🌐 Navigate: ${url}`)
@@ -330,8 +477,8 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
           return { success: true, output }
         })
       },
-      create_app: ({ name, html, css, js, icon, width, height }) => {
-        WindowManager.openApp(name, html, css, js, { icon, width, height })
+      create_app: ({ name, html, css, js, icon, width, height, description }) => {
+        WindowManager.openApp(name, html, css, js, { icon, width, height, description })
         showActivity(`💻 Created app: ${name}`)
         return { success: true, message: `App "${name}" created and opened. It's now installed in the dock.` }
       },
@@ -339,7 +486,50 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         WindowManager.openApp(name, html, css, js)
         return { success: true, message: `App "${name}" updated.` }
       },
+      uninstall_app: ({ name }) => {
+        const ok = WindowManager.uninstallApp?.(name)
+        if (ok) { showActivity(`🗑️ Uninstalled: ${name}`); return { success: true } }
+        return { error: `App "${name}" not found` }
+      },
       list_apps: () => ({ apps: WindowManager.getInstalledApps() }),
+      // --- Skill self-evolution tools ---
+      create_skill: ({ name, description, icon, schema, handler }) => {
+        const dir = `/system/skills/${name}`
+        VFS.mkdir(dir)
+        let md = `# ${name}\n\n## Description\n${description}\n\n## Icon\n${icon || '🧩'}\n`
+        if (schema) md += `\n## Schema\n\`\`\`json\n${JSON.stringify(schema, null, 2)}\n\`\`\`\n`
+        md += `\n## Handler\n\`\`\`js\n${handler}\n\`\`\`\n`
+        VFS.writeFile(`${dir}/SKILL.md`, md)
+        // Hot-load the skill
+        const parsed = parseSkillMd(md)
+        if (parsed) customSkills.set(name, parsed)
+        showActivity(`🧩 Skill created: ${name}`)
+        return { success: true, message: `Skill "${name}" created and loaded. It's now available as tool "skill_${name}".` }
+      },
+      list_skills: () => {
+        const skills = []
+        for (const [name, s] of customSkills) skills.push({ name, description: s.description, icon: s.icon })
+        // Also list from VFS
+        const dir = VFS.ls('/system/skills')
+        if (dir) for (const e of dir) {
+          if (e.type === 'dir' && !customSkills.has(e.name)) skills.push({ name: e.name, description: '(not loaded)', icon: '📁' })
+        }
+        return { skills }
+      },
+      read_skill: ({ name }) => {
+        const path = `/system/skills/${name}/SKILL.md`
+        if (!VFS.isFile(path)) return { error: `Skill "${name}" not found` }
+        return { content: VFS.readFile(path) }
+      },
+      delete_skill: ({ name }) => {
+        const dir = `/system/skills/${name}`
+        if (!VFS.isDir(dir)) return { error: `Skill "${name}" not found` }
+        VFS.rm(`${dir}/SKILL.md`)
+        VFS.rm(dir)
+        customSkills.delete(name)
+        showActivity(`🗑️ Skill deleted: ${name}`)
+        return { success: true }
+      },
       close_window: ({ title }) => { const ok = WindowManager.closeByTitle(title); return { success: ok } },
       focus_window: ({ title }) => { const ok = WindowManager.focusByTitle(title); return { success: ok } },
       list_windows: () => ({ windows: WindowManager.getState().windows }),
@@ -366,14 +556,21 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       open_image: { desc: 'Open and display an image by URL or path', schema: { type: 'object', properties: { src: { type: 'string', description: 'Image URL or path' }, title: { type: 'string' } }, required: ['src'] } },
       play_music: { desc: 'Control the music player. Actions: play, pause, next, prev, open', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'open'] }, track: { type: 'number', description: '0-based track index to play' } }, required: ['action'] } },
       open_browser: { desc: 'Open a web browser window, optionally navigating to a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'URL to navigate to' } } } },
+      open_map: { desc: 'Open the map app, optionally centered on coordinates', schema: { type: 'object', properties: { lat: { type: 'number', description: 'Latitude' }, lng: { type: 'number', description: 'Longitude' }, zoom: { type: 'number', description: 'Zoom level (1-19)' } } } },
       browser_navigate: { desc: 'Navigate the browser to a URL. Opens browser if not open.', schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
       browser_back: { desc: 'Go back to browser home page', schema: { type: 'object', properties: {} } },
       play_video: { desc: 'Open video player with a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'Video URL (YouTube embed, mp4, etc)' }, title: { type: 'string' } } } },
       video_control: { desc: 'Control video playback', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'fullscreen'] } }, required: ['action'] } },
       run_terminal: { desc: 'Execute a command in the terminal and return output. Use for any shell operation.', schema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
-      create_app: { desc: 'Create a generative app with HTML/CSS/JS. The app runs in a sandboxed window and gets installed in the dock. Use this to build any UI the user asks for - calculators, games, dashboards, tools, anything.', schema: { type: 'object', properties: { name: { type: 'string', description: 'App name shown in title bar and dock' }, html: { type: 'string', description: 'HTML body content' }, css: { type: 'string', description: 'CSS styles' }, js: { type: 'string', description: 'JavaScript code' }, icon: { type: 'string', description: 'Emoji icon for dock' }, width: { type: 'number' }, height: { type: 'number' } }, required: ['name', 'html'] } },
+      create_app: { desc: 'Create a generative app with HTML/CSS/JS. The app runs in a sandboxed window and gets installed in the dock. Use this to build any UI the user asks for - calculators, games, dashboards, tools, anything. Apps can load external CDN libraries via <script>/<link> tags in HTML.', schema: { type: 'object', properties: { name: { type: 'string', description: 'App name shown in title bar and dock' }, html: { type: 'string', description: 'HTML body content (can include <script src="cdn..."> for external libs)' }, css: { type: 'string', description: 'CSS styles' }, js: { type: 'string', description: 'JavaScript code' }, icon: { type: 'string', description: 'Emoji icon for dock' }, width: { type: 'number' }, height: { type: 'number' }, description: { type: 'string', description: 'What this app does (shown in app list)' } }, required: ['name', 'html'] } },
       update_app: { desc: 'Update an existing app with new HTML/CSS/JS', schema: { type: 'object', properties: { name: { type: 'string' }, html: { type: 'string' }, css: { type: 'string' }, js: { type: 'string' } }, required: ['name', 'html'] } },
+      uninstall_app: { desc: 'Remove an installed app from the dock', schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } },
       list_apps: { desc: 'List all installed generative apps', schema: { type: 'object', properties: {} } },
+      // Skill self-evolution
+      create_skill: { desc: 'Create a new skill (reusable tool). Skills persist across sessions and auto-load on startup. Use this when you discover a useful pattern worth saving as a permanent capability.', schema: { type: 'object', properties: { name: { type: 'string', description: 'Skill name (lowercase, no spaces)' }, description: { type: 'string', description: 'What this skill does' }, icon: { type: 'string', description: 'Emoji icon' }, schema: { type: 'object', description: 'JSON Schema for input parameters' }, handler: { type: 'string', description: 'JavaScript function body. Receives (params, VFS, Shell, WindowManager). Must return a result object.' } }, required: ['name', 'description', 'handler'] } },
+      list_skills: { desc: 'List all installed skills', schema: { type: 'object', properties: {} } },
+      read_skill: { desc: 'Read a skill definition', schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } },
+      delete_skill: { desc: 'Delete a skill', schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } },
       focus_window: { desc: 'Focus/bring a window to front by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
       list_windows: { desc: 'List all open windows', schema: { type: 'object', properties: {} } },
       update_progress: { desc: 'Mark a step as done by index (0-based). Call this after completing each planned step.', schema: { type: 'object', properties: { step_index: { type: 'number', description: '0-based step index' } }, required: ['step_index'] } },
@@ -383,7 +580,12 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     // Mark first step as running
     if (steps.length > 0) { steps[0].status = 'running'; WindowManager.updateTask(task) }
 
-    const tools = Object.entries(toolDefs).map(([name, { desc, schema }]) => ({
+    // Merge custom skill tools
+    const skillTools = getSkillTools()
+    const allToolDefs = { ...toolDefs, ...skillTools.tools }
+    const allHandlers = { ...toolHandlers, ...skillTools.handlers }
+
+    const tools = Object.entries(allToolDefs).map(([name, { desc, schema }]) => ({
       name, description: desc, input_schema: schema,
       execute: (params) => {
         if (abort.signal.aborted) throw new Error('aborted')
@@ -396,7 +598,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
           blackboard.directive = null
         }
 
-        const result = toolHandlers[name](params)
+        const result = allHandlers[name]?.(params) || toolHandlers[name]?.(params) || { error: `Unknown tool: ${name}` }
         WindowManager.updateTask(task)
 
         if (result.done) {
@@ -433,14 +635,21 @@ You have deep control over every application:
 - Editor: open_file (opens in code editor with syntax highlighting)
 - Terminal: open_terminal (visual), run_terminal (execute command and get output)
 - Browser: open_browser, browser_navigate (go to URL), browser_back
+- Map: open_map (interactive map with search, centered on coordinates)
 - Music: play_music (play/pause/next/prev, pick track by index)
 - Video: play_video (open with URL), video_control (play/pause/fullscreen)
 - Windows: open_finder, open_image, close_window, focus_window, list_windows
-- Generative Apps: create_app (build any UI with HTML/CSS/JS), update_app, list_apps
+- Generative Apps: create_app (build any UI with HTML/CSS/JS), update_app, uninstall_app, list_apps
   Apps get installed in the dock and can be re-opened. Build anything: calculators, games, dashboards, maps, tools.
-  Apps can load external CDN libraries (Leaflet, D3, Chart.js, etc.) via <script src="..."> or <link> tags in the HTML.
+  Apps can load external CDN libraries (Leaflet, D3, Chart.js, Three.js, etc.) via <script src="..."> or <link> tags in the HTML.
+- Skills (self-evolution): create_skill, list_skills, read_skill, delete_skill
+  Skills are reusable tools you create. They persist across sessions and auto-load.
+  Create a skill when you discover a useful pattern worth saving permanently.
+  Each skill has: name, description, JSON schema, and a JS handler function.
 
 You ARE the OS. Don't just open apps - use them. Create new apps when the user needs custom UI.
+
+SELF-EVOLUTION: When you discover a useful pattern (e.g., a common file operation, a data transformation, a workflow), create a skill with create_skill. Skills persist and become permanent tools. Think of it as teaching yourself new abilities.
 
 IMPORTANT: After completing each planned step, call update_progress with the step_index.
 When finished, call the done tool with a detailed summary of what you found/did — this gets reported back to the user in the conversation. Include key results, findings, file contents, command outputs, etc.`,
@@ -616,5 +825,5 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
     setTimeout(() => setWorkerStatus(''), 3000)
   }
 
-  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI }
+  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills }
 })() 
