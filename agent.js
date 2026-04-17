@@ -749,7 +749,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     // --- Merge External Skills (from Visual Talk) ---
     const _getConfig = () => {
       const s = window._settingsCache || {}
-      return { tavilyKey: s.tavilyKey, tmdbKey: s.tmdbKey, imageApiKey: s.imageApiKey, imageBaseUrl: s.imageBaseUrl, imageModel: s.imageModel, proxyUrl: 'https://proxy.link2web.site' }
+      return { tavilyKey: s.tavilyKey, tmdbKey: s.tmdbKey, proxyUrl: 'https://proxy.link2web.site' }
     }
     if (typeof ExternalSkills !== 'undefined') {
       const ext = ExternalSkills.register(_getConfig)

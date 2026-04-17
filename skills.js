@@ -199,17 +199,6 @@ const ExternalSkills = (() => {
   }
 
   // --- Image Generation ---
-  async function generateImage(args, config) {
-    const apiKey = config?.imageApiKey, baseUrl = (config?.imageBaseUrl || '').replace(/\/+$/, '')
-    if (!apiKey || !baseUrl) return { error: 'Image API key/base URL not configured in Settings' }
-    try {
-      const res = await fetch(`${baseUrl}/v1/images/generations`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify({ model: config?.imageModel || 'dall-e-3', prompt: args.prompt, n: 1, size: args.size || '1024x1024', response_format: 'url' }) })
-      if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`)
-      const data = await res.json()
-      return { url: data.data?.[0]?.url, revised_prompt: data.data?.[0]?.revised_prompt }
-    } catch (e) { return { error: `Image generation failed: ${e.message}` } }
-  }
-
   // --- Public API: returns { defs, handlers } ---
   function register(getConfig) {
     const defs = {}
@@ -262,10 +251,6 @@ const ExternalSkills = (() => {
     // NetEase Music
     defs.search_netease_music = { desc: 'Search songs on NetEase Cloud Music (网易云音乐). Returns playable MP3 URLs.', schema: { type: 'object', properties: { query: { type: 'string', description: 'Song, artist, or album name' }, limit: { type: 'number' } }, required: ['query'] } }
     handlers.search_netease_music = (p) => searchNeteaseMusic(p)
-
-    // Image Generation
-    defs.generate_image = { desc: 'Generate an image from text description using DALL-E or compatible API.', schema: { type: 'object', properties: { prompt: { type: 'string', description: 'Detailed image description' }, size: { type: 'string', enum: ['1024x1024', '1792x1024', '1024x1792'] } }, required: ['prompt'] } }
-    handlers.generate_image = (p) => { const cfg = getConfig(); return generateImage(p, cfg) }
 
     return { defs, handlers }
   }
