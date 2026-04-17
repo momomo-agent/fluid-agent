@@ -557,7 +557,29 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         showActivity(`🗑️ Skill deleted: ${name}`)
         return { success: true }
       },
-      close_window: ({ title }) => { const ok = WindowManager.closeByTitle(title); return { success: ok } },
+      set_wallpaper: ({ css, url, preset }) => {
+        const el = document.getElementById('desktop-wallpaper')
+        if (!el) return { error: 'No wallpaper element' }
+        if (url) {
+          el.style.background = `url(${url}) center/cover no-repeat`
+        } else if (css) {
+          el.style.background = css
+        } else if (preset) {
+          const presets = {
+            aurora: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)',
+            sunset: 'linear-gradient(135deg, #ff6b6b 0%, #ffa07a 30%, #ffd700 60%, #ff4500 100%)',
+            ocean: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)',
+            forest: 'linear-gradient(135deg, #134e5e 0%, #71b280 50%, #d4fc79 100%)',
+            lavender: 'linear-gradient(135deg, #e8f0fe 0%, #f0e6ff 30%, #e6f7f0 60%, #fef3e0 100%)',
+            midnight: 'linear-gradient(135deg, #0a0a2e 0%, #1a1a4e 40%, #2d1b69 70%, #0a0a2e 100%)',
+            rose: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 50%, #ff9a9e 100%)',
+            sky: 'radial-gradient(ellipse at 20% 50%, rgba(120,180,255,0.25) 0%, transparent 50%), radial-gradient(ellipse at 80% 20%, rgba(200,150,255,0.2) 0%, transparent 50%), radial-gradient(ellipse at 50% 80%, rgba(100,220,200,0.15) 0%, transparent 50%), linear-gradient(135deg, #e8f0fe 0%, #f0e6ff 30%, #e6f7f0 60%, #fef3e0 100%)',
+          }
+          el.style.background = presets[preset] || presets.sky
+          if (!presets[preset]) return { error: `Unknown preset. Available: ${Object.keys(presets).join(', ')}` }
+        }
+        return { success: true }
+      },
       focus_window: ({ title }) => { const ok = WindowManager.focusByTitle(title); return { success: ok } },
       move_window: ({ title, x, y }) => { const ok = WindowManager.moveWindow(title, x, y); return { success: ok } },
       resize_window: ({ title, width, height }) => { const ok = WindowManager.resizeWindow(title, width, height); return { success: ok } },
@@ -622,6 +644,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       open_finder: { desc: 'Open Finder at a path', schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
       open_file: { desc: 'Open file in editor', schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
       open_terminal: { desc: 'Open terminal window', schema: { type: 'object', properties: {} } },
+      set_wallpaper: { desc: 'Change the desktop wallpaper. Use preset names, a CSS gradient, or an image URL.', schema: { type: 'object', properties: { preset: { type: 'string', enum: ['aurora', 'sunset', 'ocean', 'forest', 'lavender', 'midnight', 'rose', 'sky'], description: 'Built-in wallpaper preset' }, css: { type: 'string', description: 'Custom CSS background value' }, url: { type: 'string', description: 'Image URL for wallpaper' } } } },
       close_window: { desc: 'Close a window by title or type', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
       move_window: { desc: 'Move a window to specific x,y coordinates', schema: { type: 'object', properties: { title: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['title', 'x', 'y'] } },
       resize_window: { desc: 'Resize a window to specific width/height', schema: { type: 'object', properties: { title: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' } }, required: ['title'] } },
@@ -663,7 +686,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     if (steps.length > 0) { steps[0].status = 'running'; WindowManager.updateTask(task) }
 
     // --- Tool Search: deferred tool loading ---
-    const coreToolNames = new Set(['create_file', 'read_file', 'list_directory', 'run_command', 'done', 'update_progress', 'search_tools'])
+    const coreToolNames = new Set(['create_file', 'read_file', 'list_directory', 'run_command', 'done', 'update_progress', 'search_tools', 'set_wallpaper', 'list_windows', 'close_window', 'focus_window', 'move_window', 'resize_window', 'minimize_window', 'maximize_window', 'restore_window', 'tile_windows'])
     const loadedTools = new Set([...coreToolNames])
 
     const toolCatalog = Object.fromEntries(
