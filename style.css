@@ -130,7 +130,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'SF P
 .window-dot.minimize { background: #febc2e; }
 .window-dot.maximize { background: #28c840; }
 .window:not(.focused) .window-dot { opacity: 0.35; }
-.window-title { font-size: 13px; font-weight: 600; color: var(--text-dim); flex: 1; text-align: center; }
+.window-title { font-size: 13px; font-weight: 600; color: var(--text-dim); flex: 1; text-align: center; margin-right: 68px; }
 .window-body { flex: 1; overflow: auto; min-height: 0; }
 .window-resize {
   position: absolute; bottom: 0; right: 0; width: 16px; height: 16px;
@@ -469,22 +469,23 @@ select.settings-input { appearance: none; cursor: pointer; }
 
 /* ── Header right section ── */
 #header-right {
-  display: flex; align-items: center; gap: 8px; margin-left: auto;
+  display: flex; align-items: center; gap: 10px; margin-left: auto;
+}
+#task-status {
+  font-size: 11px; color: var(--accent); display: flex; align-items: center; gap: 4px;
+  max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+#task-status:empty { display: none; }
+#task-status .spinner {
+  width: 10px; height: 10px; border: 2px solid var(--accent);
+  border-top-color: transparent; border-radius: 50%;
+  animation: spin 0.8s linear infinite; flex-shrink: 0;
 }
 #clock {
   font-size: 11px; color: rgba(0,0,0,0.45); font-variant-numeric: tabular-nums;
-  min-width: 48px; text-align: right; font-weight: 500;
+  min-width: 120px; text-align: right; font-weight: 500;
 }
-#worker-indicator {
-  font-size: 11px; color: var(--accent); display: flex; align-items: center; gap: 4px;
-  margin-left: 12px;
-}
-#worker-indicator:empty { display: none; }
-#worker-indicator .spinner {
-  width: 10px; height: 10px; border: 2px solid var(--accent);
-  border-top-color: transparent; border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── Keyboard hint ── */

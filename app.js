@@ -99,6 +99,7 @@
           case 'map': WindowManager.openMap(); break
           case 'video': WindowManager.openVideo(); break
           case 'settings': WindowManager.openSettings(); break
+          case 'spotlight': openSpotlight(); break
         }
       })
     })
@@ -107,23 +108,28 @@
     if (settings.voice) Voice.enable()
     else Voice.disable()
 
-    // --- Clock ---
+    // --- Clock (date + time) ---
     const clockEl = document.getElementById('clock')
     function updateClock() {
       const now = new Date()
-      clockEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const date = now.toLocaleDateString([], { month: 'short', day: 'numeric', weekday: 'short' })
+      const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      clockEl.textContent = `${date}  ${time}`
     }
     updateClock()
     setInterval(updateClock, 30000)
 
-    // --- Worker indicator in header ---
-    const workerInd = document.getElementById('worker-indicator')
+    // --- Task status in header ---
+    const taskStatusEl = document.getElementById('task-status')
     setInterval(() => {
       const bb = Agent.blackboard
       if (bb.currentTask && bb.currentTask.status === 'running') {
-        workerInd.innerHTML = `<div class="spinner"></div> ${bb.currentTask.goal?.slice(0, 30) || 'Working...'}`
+        const goal = bb.currentTask.goal?.slice(0, 40) || 'Working...'
+        const queued = Agent.blackboard.workerLog?.length || 0
+        const queueText = queued > 0 ? ` · ${queued} queued` : ''
+        taskStatusEl.innerHTML = `<div class="spinner"></div> ${goal}${queueText}`
       } else {
-        workerInd.innerHTML = ''
+        taskStatusEl.innerHTML = ''
       }
     }, 1000)
 

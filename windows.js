@@ -33,7 +33,7 @@ const WindowManager = (() => {
       candidates.push({ x: e.x, y: e.y + e.h + 20 })
       candidates.push({ x: e.x + 30, y: e.y + 30 })
     }
-    let best = { x: 40, y: 40 }
+    let best = { x: Math.max(40, (areaW - ww) / 2), y: Math.max(40, (areaH - wh) / 3) }
     let bestScore = -Infinity
     for (const c of candidates) {
       if (c.x < 0 || c.y < 0 || c.x + ww > areaW || c.y + wh > areaH) continue
@@ -43,7 +43,10 @@ const WindowManager = (() => {
         const oy = Math.max(0, Math.min(c.y + wh, e.y + e.h) - Math.max(c.y, e.y))
         overlap += ox * oy
       }
-      const score = -overlap
+      // Bias toward center: penalize distance from center
+      const cx = areaW / 2, cy = areaH / 2.5
+      const dist = Math.sqrt(Math.pow(c.x + ww/2 - cx, 2) + Math.pow(c.y + wh/2 - cy, 2))
+      const score = -overlap - dist * 0.3
       if (score > bestScore) { bestScore = score; best = c }
     }
     return best
