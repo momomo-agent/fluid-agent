@@ -162,11 +162,116 @@ const Agent = (() => {
 
   function setWorkerStatus(text) { document.getElementById('worker-status').textContent = text }
 
+  function renderBubbleContent(bubble, text) {
+    // Detect media patterns and render inline
+    const imgExts = /\.(jpg|jpeg|png|gif|webp|svg|bmp|avif)(\?[^\s]*)?$/i
+    const audioExts = /\.(mp3|wav|ogg|m4a|aac|flac)(\?[^\s]*)?$/i
+    const videoExts = /\.(mp4|webm|mov|mkv)(\?[^\s]*)?$/i
+    const urlRegex = /(https?:\/\/[^\s<>"']+)/g
+
+    // Also detect markdown image syntax: ![alt](url)
+    const mdImgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g
+
+    const frag = document.createDocumentFragment()
+    let lastIndex = 0
+    let hasMedia = false
+    const mediaItems = [] // for drag support
+
+    // First pass: collect all media from markdown images
+    const mdMatches = []
+    let mdMatch
+    while ((mdMatch = mdImgRegex.exec(text)) !== null) {
+      mdMatches.push({ start: mdMatch.index, end: mdMatch.index + mdMatch[0].length, url: mdMatch[2], alt: mdMatch[1], type: 'image' })
+    }
+
+    // Second pass: collect media from bare URLs (skip those already in markdown)
+    const urlMatches = []
+    let urlMatch
+    while ((urlMatch = urlRegex.exec(text)) !== null) {
+      const url = urlMatch[1]
+      const inMd = mdMatches.some(m => url === m.url || (urlMatch.index >= m.start && urlMatch.index < m.end))
+      if (inMd) continue
+      let type = null
+      if (imgExts.test(url)) type = 'image'
+      else if (audioExts.test(url)) type = 'audio'
+      else if (videoExts.test(url)) type = 'video'
+      // Also check tmdb image URLs
+      else if (url.includes('image.tmdb.org')) type = 'image'
+      if (type) urlMatches.push({ start: urlMatch.index, end: urlMatch.index + urlMatch[0].length, url, type })
+    }
+
+    const allMedia = [...mdMatches, ...urlMatches].sort((a, b) => a.start - b.start)
+    if (allMedia.length === 0) { bubble.textContent = text; return }
+
+    allMedia.forEach(m => {
+      // Add text before this media
+      if (m.start > lastIndex) {
+        const t = text.slice(lastIndex, m.start).trim()
+        if (t) { const span = document.createElement('span'); span.textContent = t; frag.appendChild(span) }
+      }
+
+      const wrap = document.createElement('div')
+      wrap.className = 'chat-media'
+      wrap.draggable = true
+      wrap.dataset.url = m.url
+      wrap.dataset.type = m.type
+
+      // Determine filename from URL
+      const fname = m.url.split('/').pop().split('?')[0] || `media.${m.type === 'image' ? 'png' : m.type === 'audio' ? 'mp3' : 'mp4'}`
+      wrap.dataset.filename = fname
+      wrap.title = `Drag to Desktop to save as ${fname}`
+
+      if (m.type === 'image') {
+        const img = document.createElement('img')
+        img.src = m.url
+        img.alt = m.alt || fname
+        img.loading = 'lazy'
+        img.addEventListener('click', () => WindowManager.openImage(m.url, m.alt || fname))
+        wrap.appendChild(img)
+      } else if (m.type === 'audio') {
+        const audio = document.createElement('audio')
+        audio.src = m.url
+        audio.controls = true
+        audio.preload = 'metadata'
+        wrap.appendChild(audio)
+      } else if (m.type === 'video') {
+        const video = document.createElement('video')
+        video.src = m.url
+        video.controls = true
+        video.preload = 'metadata'
+        video.style.maxWidth = '100%'
+        video.style.borderRadius = '8px'
+        wrap.appendChild(video)
+      }
+
+      // Drag handler — drop on desktop creates a VFS file reference
+      wrap.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('application/x-fluid-media', JSON.stringify({ url: m.url, type: m.type, filename: fname }))
+        e.dataTransfer.effectAllowed = 'copy'
+      })
+
+      frag.appendChild(wrap)
+      mediaItems.push({ url: m.url, type: m.type, filename: fname })
+      hasMedia = true
+      lastIndex = m.end
+    })
+
+    // Remaining text after last media
+    if (lastIndex < text.length) {
+      const t = text.slice(lastIndex).trim()
+      if (t) { const span = document.createElement('span'); span.textContent = t; frag.appendChild(span) }
+    }
+
+    bubble.innerHTML = ''
+    bubble.appendChild(frag)
+  }
+
   function addBubble(role, text) {
     const c = document.getElementById('chat-messages')
     const b = document.createElement('div')
     b.className = `chat-bubble ${role}`
-    b.textContent = text
+    if (role === 'agent') renderBubbleContent(b, text)
+    else b.textContent = text
     c.appendChild(b)
     c.scrollTop = c.scrollHeight
     return b
@@ -241,20 +346,20 @@ const Agent = (() => {
 
       const action = parseAction(fullReply)
       if (action?.action === 'execute' || action?.action === 'redirect') {
-        bubble.textContent = action.reply || cleanReply(fullReply)
+        renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
         enqueueTask(action.task || userMessage, action.steps, action.priority ?? 1)
       } else if (action?.action === 'steer') {
-        bubble.textContent = action.reply || cleanReply(fullReply)
+        renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
         blackboard.directive = { type: 'steer', instruction: action.instruction }
         showActivity(`↪ Steering: ${action.instruction?.slice(0, 40)}`)
       } else if (action?.action === 'abort') {
-        bubble.textContent = action.reply || cleanReply(fullReply)
+        renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
         if (workerAbort) { workerAbort.abort(); workerAbort = null }
         taskQueue.length = 0
         setWorkerStatus('')
         showActivity('Tasks cleared')
       } else if (action?.action === 'remember') {
-        bubble.textContent = action.reply || cleanReply(fullReply)
+        renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
         // Write to agent memory in VFS
         if (action.memory) {
           const memPath = '/system/memory/MEMORY.md'
@@ -269,6 +374,9 @@ const Agent = (() => {
           VFS.writeFile(memPath, mem)
           showActivity('Memory updated')
         }
+      } else {
+        // No action parsed — do final media render pass on the raw reply
+        renderBubbleContent(bubble, cleanReply(fullReply))
       }
     } catch (err) {
       if (!fullReply) bubble.textContent = `Error: ${err.message}`
@@ -939,5 +1047,5 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
     setTimeout(() => setWorkerStatus(''), 3000)
   }
 
-  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getTaskQueue: () => taskQueue }
+  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getTaskQueue: () => taskQueue, renderBubbleContent }
 })() 

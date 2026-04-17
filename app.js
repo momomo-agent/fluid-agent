@@ -439,6 +439,30 @@
     }
 
     // --- Mic button (push-to-talk) ---
+
+    // --- Desktop drop: media from chat → VFS file ---
+    desktopArea.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('application/x-fluid-media')) {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+      }
+    })
+    desktopArea.addEventListener('drop', (e) => {
+      const raw = e.dataTransfer.getData('application/x-fluid-media')
+      if (!raw) return
+      e.preventDefault()
+      try {
+        const { url, type, filename } = JSON.parse(raw)
+        const path = `/home/user/Desktop/${filename}`
+        // Store as a reference file (URL bookmark) in VFS
+        VFS.writeFile(path, `[media:${type}]\n${url}`)
+        Agent.showActivity(`Saved ${filename} to Desktop`)
+        // Open it
+        if (type === 'image') WindowManager.openImage(url, filename)
+        else if (type === 'video') WindowManager.openVideo(url, filename)
+      } catch (err) { console.warn('Drop failed:', err) }
+    })
+
     const micBtn = document.getElementById('mic-btn')
     if (micBtn) {
       let micActive = false
