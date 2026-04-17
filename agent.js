@@ -338,7 +338,7 @@ Know the difference:
 - "Find X in my files" → Reply first ("Let me look"), then execute in background.
 
 You can control:
-- Files, terminal, browser, music, video, windows
+- Files, terminal, browser, music, video, windows, web search, web fetch
 - Create apps on the fly (HTML/CSS/JS → sandboxed window)
 
 Current OS state:
@@ -557,6 +557,43 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         return { success: true }
       },
       done: ({ summary }) => { showActivity(`✅ ${summary}`); return { done: true, summary } },
+      web_search: async ({ query, search_depth }) => {
+        const saved = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
+        const apiKey = saved.tavilyKey
+        if (!apiKey) return { error: 'Tavily API key not configured. Go to Settings to add it.' }
+        showActivity(`🔍 Searching: ${query}`)
+        const payload = { api_key: apiKey, query, search_depth: search_depth || 'basic', include_images: true, max_results: 5 }
+        try {
+          let data
+          try {
+            const res = await fetch('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+            if (!res.ok) throw new Error(`Tavily ${res.status}`)
+            data = await res.json()
+          } catch (err) {
+            const res = await fetch('https://proxy.link2web.site', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'https://api.tavily.com/search', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), mode: 'raw' }) })
+            const result = await res.json()
+            if (!result.success) throw new Error(result.error || 'Proxy failed')
+            data = typeof result.body === 'string' ? JSON.parse(result.body) : result.body
+          }
+          return { results: (data.results || []).map(r => ({ title: r.title, url: r.url, content: r.content?.slice(0, 300) })), images: (data.images || []).slice(0, 5) }
+        } catch (err) { return { error: err.message } }
+      },
+      web_fetch: async ({ url, max_chars }) => {
+        showActivity(`🌐 Fetching: ${url.slice(0, 40)}...`)
+        try {
+          let text
+          try {
+            const res = await fetch(url)
+            text = await res.text()
+          } catch {
+            const res = await fetch('https://proxy.link2web.site', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, mode: 'llm' }) })
+            const result = await res.json()
+            text = result.body || result.text || ''
+          }
+          const limit = max_chars || 5000
+          return { content: text.slice(0, limit), truncated: text.length > limit }
+        } catch (err) { return { error: err.message } }
+      },
     }
 
     const toolDefs = {
@@ -594,6 +631,8 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       list_windows: { desc: 'List all open windows', schema: { type: 'object', properties: {} } },
       update_progress: { desc: 'Mark a step as done by index (0-based). Call this after completing each planned step.', schema: { type: 'object', properties: { step_index: { type: 'number', description: '0-based step index' } }, required: ['step_index'] } },
       done: { desc: 'Signal task completion', schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
+      web_search: { desc: 'Search the web for information using Tavily. Use for any question needing real-world facts, current events, or verification.', schema: { type: 'object', properties: { query: { type: 'string', description: 'Search query' }, search_depth: { type: 'string', enum: ['basic', 'advanced'] } }, required: ['query'] } },
+      web_fetch: { desc: 'Fetch and read the content of a web page URL. Returns text content.', schema: { type: 'object', properties: { url: { type: 'string', description: 'URL to fetch' }, max_chars: { type: 'number', description: 'Max characters to return (default 5000)' } }, required: ['url'] } },
     }
 
     // Mark first step as running
@@ -654,6 +693,7 @@ You have deep control over every application:
 - Editor: open_file (opens in code editor with syntax highlighting)
 - Terminal: open_terminal (visual), run_terminal (execute command and get output)
 - Browser: open_browser, browser_navigate (go to URL), browser_back
+- Web: web_search (Tavily search for real-world info), web_fetch (read any URL content)
 - Map: open_map (interactive map with search), map_add_marker (colored pins with labels), map_clear_markers, map_navigate (driving route between two points with distance/duration), map_clear_route
 - Music: play_music (play/pause/next/prev, pick track by index)
 - Video: play_video (open with URL), video_control (play/pause/fullscreen)

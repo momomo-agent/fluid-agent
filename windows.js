@@ -13,13 +13,21 @@ const WindowManager = (() => {
     w.className = 'window'
     w.id = id
     // Cascade windows so they don't stack exactly
-    const cx = (x || 60) + cascadeOffset * 30
-    const cy = (y || 40) + cascadeOffset * 30
+    const area = document.getElementById('desktop-area')
+    const areaW = area?.clientWidth || 800
+    const areaH = area?.clientHeight || 600
+    const ww = width || 500
+    const wh = height || 350
+    let cx = (x || 60) + cascadeOffset * 30
+    let cy = (y || 40) + cascadeOffset * 30
     cascadeOffset = (cascadeOffset + 1) % 6
+    // Clamp to desktop bounds
+    cx = Math.max(0, Math.min(cx, areaW - Math.min(ww, areaW)))
+    cy = Math.max(0, Math.min(cy, areaH - Math.min(wh, areaH)))
     w.style.left = cx + 'px'
     w.style.top = cy + 'px'
-    w.style.width = (width || 500) + 'px'
-    w.style.height = (height || 350) + 'px'
+    w.style.width = ww + 'px'
+    w.style.height = wh + 'px'
     w.style.zIndex = ++topZ
 
     w.innerHTML = `
@@ -66,8 +74,15 @@ const WindowManager = (() => {
     })
     document.addEventListener('mousemove', e => {
       if (!dragStart) return
-      w.style.left = (e.clientX - dragStart.x) + 'px'
-      w.style.top = (e.clientY - dragStart.y) + 'px'
+      const area = document.getElementById('desktop-area')
+      const areaRect = area?.getBoundingClientRect() || { left: 0, top: 0, right: 800, bottom: 600 }
+      let nx = e.clientX - dragStart.x
+      let ny = e.clientY - dragStart.y
+      // Keep at least 100px visible horizontally and titlebar visible vertically
+      nx = Math.max(-(w.offsetWidth - 100), Math.min(nx, areaRect.width - 100))
+      ny = Math.max(0, Math.min(ny, areaRect.height - 40))
+      w.style.left = nx + 'px'
+      w.style.top = ny + 'px'
       // Snap preview
       if (window._snapHelpers) {
         const zone = window._snapHelpers.getSnapZone(e.clientX, e.clientY)
@@ -535,6 +550,12 @@ const WindowManager = (() => {
         <input class="settings-input" id="s-baseurl" type="text" placeholder="https://api.anthropic.com" value="${saved.baseUrl || ''}">
       </div>
       <div class="settings-divider"></div>
+      <div class="settings-group-title">Web</div>
+      <div class="settings-section">
+        <div class="settings-label">Tavily API Key (for web search)</div>
+        <input class="settings-input" id="s-tavily" type="text" placeholder="tvly-..." value="${saved.tavilyKey || ''}">
+      </div>
+      <div class="settings-divider"></div>
       <div class="settings-group-title">Voice</div>
       <div class="settings-section">
         <label class="settings-toggle"><input type="checkbox" id="s-voice" ${saved.voice ? 'checked' : ''}> Enable voice (Web Speech API free, or ElevenLabs premium)</label>
@@ -557,6 +578,7 @@ const WindowManager = (() => {
         model: body.querySelector('#s-model').value,
         baseUrl: body.querySelector('#s-baseurl').value,
         voice: body.querySelector('#s-voice').checked,
+        tavilyKey: body.querySelector('#s-tavily').value,
         elevenLabsKey: body.querySelector('#s-elkey').value,
         elevenLabsVoice: body.querySelector('#s-elvoice').value,
       }
