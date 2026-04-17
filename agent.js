@@ -112,8 +112,9 @@ const Agent = (() => {
   function buildSkillHandler(handlerJs) {
     // Create a sandboxed handler function from JS string
     // Handler has access to: VFS, Shell, WindowManager, params
+    // Support both sync and async handlers
     try {
-      return new Function('params', 'VFS', 'Shell', 'WindowManager', handlerJs)
+      return new Function('params', 'VFS', 'Shell', 'WindowManager', `return (async () => { ${handlerJs} })()`)
     } catch (e) {
       return () => ({ error: `Skill handler error: ${e.message}` })
     }
@@ -125,10 +126,10 @@ const Agent = (() => {
     const handlers = {}
     for (const [name, skill] of customSkills) {
       tools[`skill_${name}`] = { desc: `[Skill] ${skill.description}`, schema: skill.schema }
-      handlers[`skill_${name}`] = (params) => {
+      handlers[`skill_${name}`] = async (params) => {
         try {
           const fn = buildSkillHandler(skill.handler_js)
-          const result = fn(params, VFS, Shell, WindowManager)
+          const result = await fn(params, VFS, Shell, WindowManager)
           showActivity(`🧩 ${name}: done`)
           return result || { success: true }
         } catch (e) {
