@@ -943,6 +943,10 @@ const WindowManager = (() => {
       })
       container.appendChild(item)
     })
+
+    // Hide separator when dock-running is empty
+    const sep = document.querySelector('.dock-separator')
+    if (sep) sep.style.display = container.children.length ? '' : 'none'
   }
 
   // --- Music Player ---
