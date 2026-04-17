@@ -160,13 +160,19 @@
       const bb = Agent.blackboard
       const ct = bb.currentTask
       const queued = Agent.getTaskQueue ? Agent.getTaskQueue() : []
-      let html = '<div class="thp-title">Tasks</div>'
+      const history = WindowManager.getTaskHistory ? WindowManager.getTaskHistory() : []
 
+      let html = '<div class="thp-header"><span class="thp-title">Task Manager</span></div>'
+
+      // Current task
       if (ct && ct.status === 'running') {
         const steps = ct.steps || []
+        const doneCount = steps.filter(s => s.status === 'done').length
+        html += '<div class="thp-section">'
         html += '<div class="thp-task active">'
-        html += `<div class="thp-task-name">${ct.goal || 'Working...'}</div>`
+        html += `<div class="thp-task-row"><span class="thp-task-name">${ct.goal || 'Working...'}</span><span class="thp-task-badge running">Running</span></div>`
         if (steps.length > 0) {
+          html += `<div class="thp-progress-row"><div class="thp-progress-bar"><div class="thp-progress-fill" style="width:${Math.round(doneCount/steps.length*100)}%"></div></div><span class="thp-progress-text">${doneCount}/${steps.length}</span></div>`
           html += '<div class="thp-steps">'
           steps.forEach(s => {
             const cls = s.status === 'done' ? 'done' : s.status === 'running' ? 'running' : 'pending'
@@ -174,21 +180,44 @@
           })
           html += '</div>'
         }
+        html += '</div></div>'
+      }
+
+      // Queued
+      if (queued.length > 0) {
+        html += `<div class="thp-section"><div class="thp-section-label">Queued (${queued.length})</div>`
+        queued.forEach(q => {
+          html += `<div class="thp-task"><div class="thp-task-row"><span class="thp-task-name">${q.taskDescription?.slice(0, 50) || 'Queued'}</span><span class="thp-task-badge queued">Queued</span></div></div>`
+        })
         html += '</div>'
       }
 
-      if (queued.length > 0) {
-        html += `<div class="thp-queue">${queued.length} task${queued.length > 1 ? 's' : ''} queued</div>`
-        queued.forEach(q => {
-          html += `<div class="thp-task"><div class="thp-task-name">${q.taskDescription?.slice(0, 60) || 'Queued'}</div></div>`
+      // History
+      const past = history.filter(t => t.status !== 'running').slice(0, 6)
+      if (past.length > 0) {
+        html += '<div class="thp-section"><div class="thp-section-label">Recent</div>'
+        past.forEach(t => {
+          const badge = t.status === 'done' ? 'done' : t.status === 'error' ? 'error' : t.status === 'aborted' ? 'aborted' : 'other'
+          const icon = t.status === 'done' ? '✓' : t.status === 'error' ? '✕' : t.status === 'aborted' ? '✕' : '○'
+          const elapsed = t.startTime ? formatElapsed(Date.now() - t.startTime) : ''
+          html += `<div class="thp-task"><div class="thp-task-row"><span class="thp-task-name">${icon} ${t.goal?.slice(0, 45) || 'Task'}</span><span class="thp-task-badge ${badge}">${elapsed}</span></div></div>`
         })
+        html += '</div>'
       }
 
-      if (!ct?.status?.match?.(/running/) && queued.length === 0) {
-        html += '<div class="thp-empty">No active tasks</div>'
+      if (!ct?.status?.match?.(/running/) && queued.length === 0 && past.length === 0) {
+        html += '<div class="thp-empty">No tasks yet</div>'
       }
 
       taskHoverPanel.innerHTML = html
+    }
+
+    function formatElapsed(ms) {
+      const s = Math.floor(ms / 1000)
+      if (s < 60) return `${s}s ago`
+      const m = Math.floor(s / 60)
+      if (m < 60) return `${m}m ago`
+      return `${Math.floor(m / 60)}h ago`
     }
 
     setInterval(() => {
