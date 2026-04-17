@@ -5,6 +5,51 @@ const WindowManager = (() => {
   const windows = new Map()
   const area = () => document.getElementById('desktop-area')
 
+  // --- Centralized drag/resize state (one document listener, not per-window) ---
+  let _activeDrag = null   // { el, id, offsetX, offsetY }
+  let _activeResize = null // { el, startX, startY, startW, startH }
+
+  document.addEventListener('mousemove', e => {
+    if (_activeDrag) {
+      const d = _activeDrag
+      const areaEl = document.getElementById('desktop-area')
+      const areaRect = areaEl?.getBoundingClientRect() || { left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 }
+      let nx = e.clientX - d.offsetX
+      let ny = e.clientY - d.offsetY
+      nx = Math.max(-(d.el.offsetWidth - 100), Math.min(nx, areaRect.width - 100))
+      ny = Math.max(0, Math.min(ny, areaRect.height - 40))
+      d.el.style.left = nx + 'px'
+      d.el.style.top = ny + 'px'
+      if (window._snapHelpers) {
+        const zone = window._snapHelpers.getSnapZone(e.clientX, e.clientY)
+        window._snapHelpers.showSnapPreview(zone)
+      }
+    }
+    if (_activeResize) {
+      const r = _activeResize
+      r.el.style.width = Math.max(300, r.startW + e.clientX - r.startX) + 'px'
+      r.el.style.height = Math.max(200, r.startH + e.clientY - r.startY) + 'px'
+    }
+  })
+
+  document.addEventListener('mouseup', e => {
+    if (_activeDrag) {
+      const body = _activeDrag.el.querySelector('.window-body')
+      if (body) body.style.pointerEvents = ''
+      if (window._snapHelpers) {
+        const zone = window._snapHelpers.getSnapZone(e.clientX, e.clientY)
+        if (zone) window._snapHelpers.applySnap(zone, _activeDrag.el)
+        window._snapHelpers.hideSnapPreview()
+      }
+      _activeDrag = null
+    }
+    if (_activeResize) {
+      const body = _activeResize.el.querySelector('.window-body')
+      if (body) body.style.pointerEvents = ''
+      _activeResize = null
+    }
+  })
+
   // --- Smart window placement: find least-overlapping position ---
   function findBestPosition(ww, wh, areaW, areaH) {
     const existing = []
@@ -114,12 +159,10 @@ const WindowManager = (() => {
 
     // Drag
     const titlebar = w.querySelector('.window-titlebar')
-    let dragStart = null
     titlebar.addEventListener('mousedown', e => {
       if (e.target.classList.contains('window-dot')) return
-      dragStart = { x: e.clientX - w.offsetLeft, y: e.clientY - w.offsetTop }
+      _activeDrag = { el: w, id, offsetX: e.clientX - w.offsetLeft, offsetY: e.clientY - w.offsetTop }
       focus(id)
-      // Block inner content from stealing events during drag
       const body = w.querySelector('.window-body')
       if (body) body.style.pointerEvents = 'none'
     })
@@ -140,55 +183,15 @@ const WindowManager = (() => {
         { label: 'Close', action: () => _close(id) },
       ])
     })
-    document.addEventListener('mousemove', e => {
-      if (!dragStart) return
-      const area = document.getElementById('desktop-area')
-      const areaRect = area?.getBoundingClientRect() || { left: 0, top: 0, right: 800, bottom: 600 }
-      let nx = e.clientX - dragStart.x
-      let ny = e.clientY - dragStart.y
-      // Keep at least 100px visible horizontally and titlebar visible vertically
-      nx = Math.max(-(w.offsetWidth - 100), Math.min(nx, areaRect.width - 100))
-      ny = Math.max(0, Math.min(ny, areaRect.height - 40))
-      w.style.left = nx + 'px'
-      w.style.top = ny + 'px'
-      // Snap preview
-      if (window._snapHelpers) {
-        const zone = window._snapHelpers.getSnapZone(e.clientX, e.clientY)
-        window._snapHelpers.showSnapPreview(zone)
-      }
-    })
-    document.addEventListener('mouseup', (e) => {
-      if (dragStart) {
-        const body = w.querySelector('.window-body')
-        if (body) body.style.pointerEvents = ''
-        if (window._snapHelpers) {
-          const zone = window._snapHelpers.getSnapZone(e.clientX, e.clientY)
-          if (zone) window._snapHelpers.applySnap(zone, w)
-          window._snapHelpers.hideSnapPreview()
-        }
-      }
-      dragStart = null
-    })
 
     // Resize
     const resizeHandle = w.querySelector('.window-resize')
-    let resizeStart = null
-    const winBody = w.querySelector('.window-body')
     resizeHandle.addEventListener('mousedown', e => {
       e.stopPropagation()
       e.preventDefault()
-      resizeStart = { x: e.clientX, y: e.clientY, w: w.offsetWidth, h: w.offsetHeight }
-      // Block inner content (map/iframe) from stealing events
-      if (winBody) winBody.style.pointerEvents = 'none'
-    })
-    document.addEventListener('mousemove', e => {
-      if (!resizeStart) return
-      w.style.width = Math.max(300, resizeStart.w + e.clientX - resizeStart.x) + 'px'
-      w.style.height = Math.max(200, resizeStart.h + e.clientY - resizeStart.y) + 'px'
-    })
-    document.addEventListener('mouseup', () => {
-      if (resizeStart && winBody) winBody.style.pointerEvents = ''
-      resizeStart = null
+      _activeResize = { el: w, startX: e.clientX, startY: e.clientY, startW: w.offsetWidth, startH: w.offsetHeight }
+      const body = w.querySelector('.window-body')
+      if (body) body.style.pointerEvents = 'none'
     })
 
     desktopArea.appendChild(w)
