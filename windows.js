@@ -801,14 +801,69 @@ const WindowManager = (() => {
       </div>
       <div class="settings-section">
         <div class="settings-label">ElevenLabs API Key (optional, for premium voice)</div>
-        <input class="settings-input" id="s-elkey" type="text" placeholder="xi-..." value="${saved.elevenLabsKey || ''}">
+        <input class="settings-input" id="s-elkey" type="text" placeholder="sk_..." value="${saved.elevenLabsKey || ''}">
       </div>
       <div class="settings-section">
-        <div class="settings-label">Voice ID</div>
-        <input class="settings-input" id="s-elvoice" type="text" placeholder="JBFqnCBsd6RMkjVDRZzb" value="${saved.elevenLabsVoice || ''}">
+        <div class="settings-label">Voice</div>
+        <select class="settings-input" id="s-elvoice" style="height:36px">
+          <option value="">Enter API key to load voices...</option>
+        </select>
+        <div id="s-elvoice-preview" style="margin-top:6px"></div>
       </div>
       <button class="settings-save" id="s-save">Save & Apply</button>
     </div>`
+
+    // --- ElevenLabs voice picker ---
+    const elKeyInput = body.querySelector('#s-elkey')
+    const elVoiceSelect = body.querySelector('#s-elvoice')
+    const elPreview = body.querySelector('#s-elvoice-preview')
+    let voicesCache = null
+
+    async function loadVoices(apiKey) {
+      if (!apiKey) {
+        elVoiceSelect.innerHTML = '<option value="">Enter API key to load voices...</option>'
+        elPreview.innerHTML = ''
+        return
+      }
+      elVoiceSelect.innerHTML = '<option value="">Loading voices...</option>'
+      try {
+        const res = await fetch('https://api.elevenlabs.io/v1/voices', {
+          headers: { 'xi-api-key': apiKey }
+        })
+        if (!res.ok) throw new Error(res.status)
+        const data = await res.json()
+        voicesCache = data.voices || []
+        elVoiceSelect.innerHTML = voicesCache.map(v => {
+          const labels = v.labels ? Object.values(v.labels).filter(Boolean).join(', ') : ''
+          return `<option value="${v.voice_id}" ${v.voice_id === (saved.elevenLabsVoice || '') ? 'selected' : ''}>${v.name}${labels ? ' — ' + labels : ''}</option>`
+        }).join('')
+        if (!voicesCache.length) elVoiceSelect.innerHTML = '<option value="">No voices found</option>'
+        updatePreview()
+      } catch (e) {
+        elVoiceSelect.innerHTML = '<option value="">Failed to load voices</option>'
+        elPreview.innerHTML = ''
+      }
+    }
+
+    function updatePreview() {
+      const id = elVoiceSelect.value
+      const voice = voicesCache?.find(v => v.voice_id === id)
+      if (voice) {
+        const labels = voice.labels ? Object.entries(voice.labels).map(([k,v]) => `${k}: ${v}`).join(' · ') : ''
+        elPreview.innerHTML = `<span style="font-size:12px;color:var(--text-muted)">${labels || voice.category || ''}</span>`
+      } else elPreview.innerHTML = ''
+    }
+
+    elVoiceSelect.addEventListener('change', updatePreview)
+    // Debounced key input → reload voices
+    let keyTimer = null
+    elKeyInput.addEventListener('input', () => {
+      clearTimeout(keyTimer)
+      keyTimer = setTimeout(() => loadVoices(elKeyInput.value.trim()), 600)
+    })
+    // Load on open if key exists
+    if (saved.elevenLabsKey) loadVoices(saved.elevenLabsKey)
+
     body.querySelector('#s-save').addEventListener('click', async () => {
       const settings = {
         provider: body.querySelector('#s-provider').value,
