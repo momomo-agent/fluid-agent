@@ -1291,5 +1291,103 @@ ${css}
   // Hook into drag/resize end to save session
   document.addEventListener('mouseup', () => { if (_sessionAi) saveSession() })
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
+  // --- Programmatic window manipulation ---
+  function findByTitle(title) {
+    const t = title.toLowerCase()
+    for (const [id, w] of windows) {
+      const wTitle = w.el.querySelector('.window-title')?.textContent?.toLowerCase() || ''
+      const wType = (w.type || '').toLowerCase()
+      if (wTitle.includes(t) || wType.includes(t)) return id
+    }
+    return null
+  }
+
+  function moveWindow(title, x, y) {
+    const id = findByTitle(title)
+    if (!id) return false
+    const w = windows.get(id)
+    if (!w) return false
+    w.el.style.left = x + 'px'
+    w.el.style.top = y + 'px'
+    return true
+  }
+
+  function resizeWindow(title, width, height) {
+    const id = findByTitle(title)
+    if (!id) return false
+    const w = windows.get(id)
+    if (!w) return false
+    if (width) w.el.style.width = width + 'px'
+    if (height) w.el.style.height = height + 'px'
+    return true
+  }
+
+  function minimizeByTitle(title) {
+    const id = findByTitle(title)
+    if (!id) return false
+    minimize(id)
+    return true
+  }
+
+  function maximizeByTitle(title) {
+    const id = findByTitle(title)
+    if (!id) return false
+    toggleFullscreen(id)
+    return true
+  }
+
+  function unminimizeByTitle(title) {
+    const id = findByTitle(title)
+    if (!id) return false
+    unminimize(id)
+    return true
+  }
+
+  function tileWindows(layout) {
+    const area = document.getElementById('desktop-area')
+    const aW = area?.clientWidth || 800
+    const aH = area?.clientHeight || 600
+    const ids = [...windows.keys()].filter(id => {
+      const w = windows.get(id)
+      return w && !w.el.classList.contains('minimized')
+    })
+    if (ids.length === 0) return false
+    if (layout === 'horizontal') {
+      const w = Math.floor(aW / ids.length)
+      ids.forEach((id, i) => {
+        const win = windows.get(id)
+        win.el.style.left = (i * w) + 'px'
+        win.el.style.top = '0px'
+        win.el.style.width = w + 'px'
+        win.el.style.height = aH + 'px'
+      })
+    } else if (layout === 'grid') {
+      const cols = Math.ceil(Math.sqrt(ids.length))
+      const rows = Math.ceil(ids.length / cols)
+      const cw = Math.floor(aW / cols)
+      const ch = Math.floor(aH / rows)
+      ids.forEach((id, i) => {
+        const win = windows.get(id)
+        const col = i % cols
+        const row = Math.floor(i / cols)
+        win.el.style.left = (col * cw) + 'px'
+        win.el.style.top = (row * ch) + 'px'
+        win.el.style.width = cw + 'px'
+        win.el.style.height = ch + 'px'
+      })
+    } else {
+      // vertical (default)
+      const h = Math.floor(aH / ids.length)
+      ids.forEach((id, i) => {
+        const win = windows.get(id)
+        win.el.style.left = '0px'
+        win.el.style.top = (i * h) + 'px'
+        win.el.style.width = aW + 'px'
+        win.el.style.height = h + 'px'
+      })
+    }
+    return true
+  }
+
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, moveWindow, resizeWindow, minimizeByTitle, maximizeByTitle, unminimizeByTitle, tileWindows, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()
