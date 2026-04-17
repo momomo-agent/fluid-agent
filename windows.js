@@ -119,6 +119,9 @@ const WindowManager = (() => {
       if (e.target.classList.contains('window-dot')) return
       dragStart = { x: e.clientX - w.offsetLeft, y: e.clientY - w.offsetTop }
       focus(id)
+      // Block inner content from stealing events during drag
+      const body = w.querySelector('.window-body')
+      if (body) body.style.pointerEvents = 'none'
     })
     document.addEventListener('mousemove', e => {
       if (!dragStart) return
@@ -138,10 +141,14 @@ const WindowManager = (() => {
       }
     })
     document.addEventListener('mouseup', (e) => {
-      if (dragStart && window._snapHelpers) {
-        const zone = window._snapHelpers.getSnapZone(e.clientX, e.clientY)
-        if (zone) window._snapHelpers.applySnap(zone, w)
-        window._snapHelpers.hideSnapPreview()
+      if (dragStart) {
+        const body = w.querySelector('.window-body')
+        if (body) body.style.pointerEvents = ''
+        if (window._snapHelpers) {
+          const zone = window._snapHelpers.getSnapZone(e.clientX, e.clientY)
+          if (zone) window._snapHelpers.applySnap(zone, w)
+          window._snapHelpers.hideSnapPreview()
+        }
       }
       dragStart = null
     })
@@ -149,16 +156,23 @@ const WindowManager = (() => {
     // Resize
     const resizeHandle = w.querySelector('.window-resize')
     let resizeStart = null
+    const winBody = w.querySelector('.window-body')
     resizeHandle.addEventListener('mousedown', e => {
       e.stopPropagation()
+      e.preventDefault()
       resizeStart = { x: e.clientX, y: e.clientY, w: w.offsetWidth, h: w.offsetHeight }
+      // Block inner content (map/iframe) from stealing events
+      if (winBody) winBody.style.pointerEvents = 'none'
     })
     document.addEventListener('mousemove', e => {
       if (!resizeStart) return
       w.style.width = Math.max(300, resizeStart.w + e.clientX - resizeStart.x) + 'px'
       w.style.height = Math.max(200, resizeStart.h + e.clientY - resizeStart.y) + 'px'
     })
-    document.addEventListener('mouseup', () => { resizeStart = null })
+    document.addEventListener('mouseup', () => {
+      if (resizeStart && winBody) winBody.style.pointerEvents = ''
+      resizeStart = null
+    })
 
     desktopArea.appendChild(w)
     const winObj = { id, type, el: w, data: data || {} }
