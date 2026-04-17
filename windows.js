@@ -392,11 +392,92 @@ const WindowManager = (() => {
   }
 
   // ── Editor ──
+  // ── Lightweight Markdown parser ──
+  function parseMd(src) {
+    let html = escapeHtml(src)
+    // Code blocks
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+      `<pre class="md-code-block"><code>${code.trim()}</code></pre>`)
+    // Headings
+    html = html.replace(/^(#{1,6})\s+(.+)$/gm, (_, h, text) => {
+      const level = h.length
+      return `<div class="md-h md-h${level}">${text}</div>`
+    })
+    // Blockquote
+    html = html.replace(/^&gt;\s?(.+)$/gm, '<div class="md-blockquote">$1</div>')
+    // Horizontal rule
+    html = html.replace(/^(---|\.{3}|\*\*\*)$/gm, '<hr class="md-hr">')
+    // Bold + italic
+    html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
+    // Strikethrough
+    html = html.replace(/~~(.+?)~~/g, '<del>$1</del>')
+    // Links
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="md-link">$1</a>')
+    // Images
+    html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<span class="md-image">🖼 $1</span>')
+    // Unordered list
+    html = html.replace(/^(\s*)[-*+]\s+(.+)$/gm, (_, indent, text) => {
+      const depth = Math.floor(indent.length / 2)
+      return `<div class="md-li" style="padding-left:${12 + depth * 16}px">• ${text}</div>`
+    })
+    // Ordered list
+    html = html.replace(/^(\s*)(\d+)\.\s+(.+)$/gm, (_, indent, num, text) => {
+      const depth = Math.floor(indent.length / 2)
+      return `<div class="md-li" style="padding-left:${12 + depth * 16}px">${num}. ${text}</div>`
+    })
+    // Checkbox
+    html = html.replace(/\[x\]/gi, '<span class="md-check done">☑</span>')
+    html = html.replace(/\[ \]/g, '<span class="md-check">☐</span>')
+    // Paragraphs (double newline)
+    html = html.replace(/\n\n/g, '<div class="md-blank"></div>')
+    html = html.replace(/\n/g, '<br>')
+    return html
+  }
+
   function renderEditor(w, body) {
     const path = w.data.path || ''
     const content = VFS.readFile(path) || ''
-    body.innerHTML = `<div class="editor-body"><textarea class="editor-textarea">${escapeHtml(content)}</textarea></div>`
+    const isMd = path.endsWith('.md') || path.endsWith('.markdown')
+
+    body.innerHTML = `<div class="editor-body">
+      <div class="editor-toolbar">
+        <span class="editor-filename">${path.split('/').pop()}</span>
+        ${isMd ? '<button class="editor-toggle" data-mode="preview">Edit</button>' : ''}
+      </div>
+      ${isMd ? `<div class="editor-preview md-body">${parseMd(content)}</div>` : ''}
+      <textarea class="editor-textarea ${isMd ? 'hidden' : ''}">${escapeHtml(content)}</textarea>
+    </div>`
+
     const textarea = body.querySelector('.editor-textarea')
+    const preview = body.querySelector('.editor-preview')
+    const toggle = body.querySelector('.editor-toggle')
+    let mode = isMd ? 'preview' : 'edit'
+
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        if (mode === 'preview') {
+          mode = 'edit'
+          textarea.classList.remove('hidden')
+          if (preview) preview.classList.add('hidden')
+          toggle.textContent = 'Preview'
+          toggle.dataset.mode = 'edit'
+          textarea.focus()
+        } else {
+          mode = 'preview'
+          textarea.classList.add('hidden')
+          if (preview) {
+            preview.innerHTML = parseMd(textarea.value)
+            preview.classList.remove('hidden')
+          }
+          toggle.textContent = 'Edit'
+          toggle.dataset.mode = 'preview'
+        }
+      })
+    }
 
     // Auto-save on change
     let saveTimer = null
@@ -413,8 +494,16 @@ const WindowManager = (() => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
         VFS.writeFile(path, textarea.value)
+        if (preview && mode === 'preview') preview.innerHTML = parseMd(textarea.value)
       }
     })
+
+    // Double-click preview to edit
+    if (preview) {
+      preview.addEventListener('dblclick', () => {
+        if (toggle) toggle.click()
+      })
+    }
   }
 
   function escapeHtml(s) {
