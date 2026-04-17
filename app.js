@@ -383,6 +383,7 @@
       activeMenu = menu
     }
     document.addEventListener('click', () => { if (activeMenu) { activeMenu.remove(); activeMenu = null } })
+    window.showContextMenu = showContextMenu
 
     // Desktop right-click
     document.getElementById('desktop-area').addEventListener('contextmenu', (e) => {
@@ -397,6 +398,59 @@
         { icon: '🧹', label: 'Clean Desktop', action: () => Agent.chat('Organize and clean up my Desktop') },
         { icon: '⚙️', label: 'Settings', action: () => WindowManager.openSettings() },
       ])
+    })
+
+    // Dock right-click
+    document.getElementById('dock').addEventListener('contextmenu', (e) => {
+      const item = e.target.closest('.dock-item')
+      if (!item) return
+      e.preventDefault()
+      e.stopPropagation()
+      const appName = item.dataset.app || item.title
+      const isPinned = item.closest('.dock-pinned')
+      const isGenApp = item.classList.contains('dock-app')
+      const items = []
+      items.push({ label: `Open ${appName}`, action: () => {
+        if (item.dataset.app) {
+          const openers = { finder: () => WindowManager.openFinder(), terminal: () => WindowManager.openTerminal(), browser: () => WindowManager.openBrowser('https://example.com'), music: () => WindowManager.openMusic(), video: () => WindowManager.openVideo(), map: () => WindowManager.openMap(), settings: () => WindowManager.openSettings(), spotlight: () => document.getElementById('spotlight')?.classList.add('visible') }
+          ;(openers[item.dataset.app] || (() => {}))() 
+        } else WindowManager.openApp(appName)
+      }})
+      if (isGenApp) {
+        items.push('---')
+        items.push({ label: 'Uninstall', action: () => { WindowManager.uninstallApp(appName); WindowManager.updateDock() } })
+      }
+      showContextMenu(e.clientX, e.clientY, items)
+    })
+
+    // Chat bubble right-click
+    document.getElementById('chat-messages').addEventListener('contextmenu', (e) => {
+      const bubble = e.target.closest('.chat-bubble')
+      const media = e.target.closest('.chat-media')
+      if (!bubble && !media) return
+      e.preventDefault()
+      e.stopPropagation()
+      const items = []
+      if (media) {
+        const url = media.dataset.url
+        const type = media.dataset.type
+        const fname = media.dataset.filename
+        items.push({ label: 'Save to Desktop', action: () => {
+          VFS.writeFile(`/home/user/Desktop/${fname}`, `[media:${type}]\n${url}`)
+          Agent.showActivity(`Saved ${fname} to Desktop`)
+        }})
+        if (type === 'image') items.push({ label: 'Open in Viewer', action: () => WindowManager.openImage(url, fname) })
+        if (type === 'video') items.push({ label: 'Open in Player', action: () => WindowManager.openVideo(url, fname) })
+        items.push('---')
+      }
+      if (bubble) {
+        const text = bubble.textContent
+        items.push({ label: 'Copy', action: () => navigator.clipboard?.writeText(text) })
+        if (bubble.classList.contains('agent') && Voice?.isEnabled()) {
+          items.push({ label: 'Read Aloud', action: () => Voice.speak(text) })
+        }
+      }
+      if (items.length) showContextMenu(e.clientX, e.clientY, items)
     })
 
     // --- Window snapping ---

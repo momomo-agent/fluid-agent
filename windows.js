@@ -123,6 +123,23 @@ const WindowManager = (() => {
       const body = w.querySelector('.window-body')
       if (body) body.style.pointerEvents = 'none'
     })
+    titlebar.addEventListener('contextmenu', e => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!window.showContextMenu) return
+      const wData = windows.get(id)
+      const isFs = w.classList.contains('fullscreen')
+      const isMin = wData?.minimized
+      window.showContextMenu(e.clientX, e.clientY, [
+        { label: isFs ? 'Exit Fullscreen' : 'Fullscreen', action: () => toggleFullscreen(id) },
+        { label: 'Minimize', action: () => minimize(id) },
+        '---',
+        { label: 'Tile Left', action: () => { const a = document.getElementById('desktop-area'); const h = a.offsetHeight; Object.assign(w.style, { left: '0', top: '0', width: a.offsetWidth/2+'px', height: h+'px' }) } },
+        { label: 'Tile Right', action: () => { const a = document.getElementById('desktop-area'); const h = a.offsetHeight; Object.assign(w.style, { left: a.offsetWidth/2+'px', top: '0', width: a.offsetWidth/2+'px', height: h+'px' }) } },
+        '---',
+        { label: 'Close', action: () => _close(id) },
+      ])
+    })
     document.addEventListener('mousemove', e => {
       if (!dragStart) return
       const area = document.getElementById('desktop-area')
@@ -295,6 +312,37 @@ const WindowManager = (() => {
           // Open file in editor
           openEditor(VFS.normPath(path + '/' + name))
         }
+      })
+      el.addEventListener('contextmenu', (ev) => {
+        const name = el.dataset.path
+        if (name === '..') return
+        ev.preventDefault()
+        ev.stopPropagation()
+        if (!window.showContextMenu) return
+        const type = el.dataset.type
+        const fullPath = VFS.normPath(path + '/' + name)
+        const items = []
+        if (type === 'dir') {
+          items.push({ label: 'Open', action: () => { w.data.path = fullPath; w.el.querySelector('.window-title').textContent = name; renderFinder(w, body) } })
+        } else {
+          items.push({ label: 'Open', action: () => openEditor(fullPath) })
+        }
+        items.push({ label: 'Copy Path', action: () => navigator.clipboard?.writeText(fullPath) })
+        items.push('---')
+        items.push({ label: 'Rename', action: () => {
+          const newName = prompt('Rename to:', name)
+          if (newName && newName !== name) {
+            const content = VFS.readFile(fullPath)
+            const newPath = VFS.normPath(path + '/' + newName)
+            if (content != null) { VFS.writeFile(newPath, content); VFS.rm(fullPath) }
+            else if (VFS.isDir(fullPath)) { VFS.mkdir(newPath); VFS.rm(fullPath) }
+            renderFinder(w, body)
+          }
+        }})
+        items.push({ label: 'Delete', action: () => {
+          if (confirm(`Delete ${name}?`)) { VFS.rm(fullPath); renderFinder(w, body) }
+        }})
+        window.showContextMenu(ev.clientX, ev.clientY, items)
       })
     })
   }
