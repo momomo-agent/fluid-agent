@@ -868,41 +868,172 @@ const WindowManager = (() => {
 
   function openMap(lat, lng, zoom) {
     if (mapId && windows.has(mapId)) { focus(mapId); return mapId }
-    mapId = create({ type: 'map', title: 'Map', x: 120, y: 50, width: 560, height: 420, data: { lat: lat || 39.9042, lng: lng || 116.4074, zoom: zoom || 12 } })
+    mapId = create({ type: 'map', title: 'Map', x: 120, y: 50, width: 560, height: 420, data: { lat: lat || 39.9042, lng: lng || 116.4074, zoom: zoom || 12, markers: [], route: null } })
     updateDock()
     return mapId
   }
 
+  // External API for agent to control map
+  function mapAddMarker(lat, lng, label, color) {
+    const w = mapId && windows.get(mapId)
+    if (!w) return false
+    if (!w.data.markers) w.data.markers = []
+    w.data.markers.push({ lat, lng, label: label || '', color: color || 'blue' })
+    const iframe = w.el.querySelector('.window-body iframe')
+    if (iframe?.contentWindow?.addMarker) iframe.contentWindow.addMarker(lat, lng, label, color)
+    return true
+  }
+
+  function mapClearMarkers() {
+    const w = mapId && windows.get(mapId)
+    if (!w) return false
+    w.data.markers = []
+    const iframe = w.el.querySelector('.window-body iframe')
+    if (iframe?.contentWindow?.clearMarkers) iframe.contentWindow.clearMarkers()
+    return true
+  }
+
+  function mapShowRoute(from, to) {
+    const w = mapId && windows.get(mapId)
+    if (!w) return false
+    w.data.route = { from, to }
+    const iframe = w.el.querySelector('.window-body iframe')
+    if (iframe?.contentWindow?.showRoute) iframe.contentWindow.showRoute(from, to)
+    return true
+  }
+
+  function mapClearRoute() {
+    const w = mapId && windows.get(mapId)
+    if (!w) return false
+    w.data.route = null
+    const iframe = w.el.querySelector('.window-body iframe')
+    if (iframe?.contentWindow?.clearRoute) iframe.contentWindow.clearRoute()
+    return true
+  }
+
   function renderMap(w, body) {
-    const { lat, lng, zoom } = w.data || { lat: 39.9042, lng: 116.4074, zoom: 12 }
+    const { lat, lng, zoom, markers, route } = w.data || { lat: 39.9042, lng: 116.4074, zoom: 12, markers: [], route: null }
+    const markersJson = JSON.stringify(markers || [])
+    const routeJson = JSON.stringify(route || null)
     const doc = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #map { width: 100%; height: 100%; }
-.search-bar { position: absolute; top: 10px; left: 50px; right: 50px; z-index: 1000; }
-.search-bar input { width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(22,27,38,0.9); color: #e2e8f0; font-size: 13px; backdrop-filter: blur(8px); outline: none; }
+.search-bar { position: absolute; top: 10px; left: 50px; right: 10px; z-index: 1000; display: flex; gap: 6px; }
+.search-bar input { flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(22,27,38,0.9); color: #e2e8f0; font-size: 13px; backdrop-filter: blur(8px); outline: none; }
 .search-bar input:focus { border-color: #60a5fa; }
+.search-bar button { padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(22,27,38,0.9); color: #94a3b8; font-size: 13px; cursor: pointer; backdrop-filter: blur(8px); }
+.search-bar button:hover { background: rgba(40,50,70,0.9); color: #e2e8f0; }
 .coords { position: absolute; bottom: 8px; left: 8px; z-index: 1000; background: rgba(22,27,38,0.85); color: #94a3b8; padding: 4px 8px; border-radius: 6px; font-size: 11px; backdrop-filter: blur(8px); }
+.marker-count { position: absolute; bottom: 8px; right: 8px; z-index: 1000; background: rgba(22,27,38,0.85); color: #94a3b8; padding: 4px 8px; border-radius: 6px; font-size: 11px; backdrop-filter: blur(8px); }
 </style></head><body>
-<div class="search-bar"><input id="search" placeholder="Search location..." /></div>
+<div class="search-bar">
+  <input id="search" placeholder="Search location..." />
+  <button id="btn-pin" title="Drop pin at center">📍</button>
+  <button id="btn-clear" title="Clear all markers">🗑</button>
+</div>
 <div id="map"></div>
 <div class="coords" id="coords">${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
+<div class="marker-count" id="marker-count"></div>
 <script>
 var map = L.map('map', { zoomControl: false }).setView([${lat}, ${lng}], ${zoom});
 L.control.zoom({ position: 'topright' }).addTo(map);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap',
-  maxZoom: 19
+  attribution: '\u00a9 OpenStreetMap', maxZoom: 19
 }).addTo(map);
-var marker = L.marker([${lat}, ${lng}]).addTo(map);
+
+var markers = [];
+var routeLine = null;
+var markerColors = {
+  red: '#ef4444', blue: '#3b82f6', green: '#22c55e', orange: '#f97316',
+  purple: '#a855f7', pink: '#ec4899', yellow: '#eab308'
+};
+
+function makeIcon(color) {
+  var c = markerColors[color] || markerColors.blue;
+  return L.divIcon({
+    className: '',
+    html: '<div style="width:24px;height:24px;border-radius:50% 50% 50% 0;background:'+c+';transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>',
+    iconSize: [24, 24], iconAnchor: [12, 24], popupAnchor: [0, -24]
+  });
+}
+
+function addMarker(lat, lng, label, color) {
+  var m = L.marker([lat, lng], { icon: makeIcon(color || 'blue') }).addTo(map);
+  if (label) m.bindPopup(label);
+  markers.push(m);
+  updateCount();
+  return m;
+}
+
+function clearMarkers() {
+  markers.forEach(function(m) { map.removeLayer(m); });
+  markers = [];
+  updateCount();
+}
+
+function updateCount() {
+  var el = document.getElementById('marker-count');
+  el.textContent = markers.length > 0 ? markers.length + ' pin' + (markers.length > 1 ? 's' : '') : '';
+}
+
+function showRoute(from, to) {
+  clearRoute();
+  // Use OSRM for routing
+  var url = 'https://router.project-osrm.org/route/v1/driving/' +
+    from.lng + ',' + from.lat + ';' + to.lng + ',' + to.lat +
+    '?overview=full&geometries=geojson';
+  fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.routes && data.routes.length > 0) {
+      var coords = data.routes[0].geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
+      routeLine = L.polyline(coords, { color: '#3b82f6', weight: 4, opacity: 0.8 }).addTo(map);
+      map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+      // Show distance and duration
+      var dist = data.routes[0].distance;
+      var dur = data.routes[0].duration;
+      var distStr = dist > 1000 ? (dist/1000).toFixed(1) + ' km' : Math.round(dist) + ' m';
+      var durStr = dur > 3600 ? Math.floor(dur/3600) + 'h ' + Math.round((dur%3600)/60) + 'min' : Math.round(dur/60) + ' min';
+      routeLine.bindPopup(distStr + ' \u00b7 ' + durStr).openPopup();
+    }
+  }).catch(function() {});
+}
+
+function clearRoute() {
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+}
+
+// Load initial markers
+var initMarkers = ${markersJson};
+initMarkers.forEach(function(m) { addMarker(m.lat, m.lng, m.label, m.color); });
+
+// Load initial route
+var initRoute = ${routeJson};
+if (initRoute) showRoute(initRoute.from, initRoute.to);
+
+// Click to add marker
+map.on('click', function(e) {
+  addMarker(e.latlng.lat, e.latlng.lng, '', 'blue');
+});
+
 map.on('mousemove', function(e) {
   document.getElementById('coords').textContent = e.latlng.lat.toFixed(4) + ', ' + e.latlng.lng.toFixed(4);
 });
-map.on('click', function(e) {
-  marker.setLatLng(e.latlng);
+
+// Pin button: drop at center
+document.getElementById('btn-pin').addEventListener('click', function() {
+  var c = map.getCenter();
+  addMarker(c.lat, c.lng, 'Pin', 'red');
 });
+
+// Clear button
+document.getElementById('btn-clear').addEventListener('click', function() {
+  clearMarkers();
+  clearRoute();
+});
+
+// Search
 document.getElementById('search').addEventListener('keydown', function(e) {
   if (e.key !== 'Enter') return;
   var q = this.value.trim();
@@ -913,8 +1044,7 @@ document.getElementById('search').addEventListener('keydown', function(e) {
       if (data && data.length > 0) {
         var lat = parseFloat(data[0].lat), lon = parseFloat(data[0].lon);
         map.setView([lat, lon], 14);
-        marker.setLatLng([lat, lon]);
-        marker.bindPopup(data[0].display_name).openPopup();
+        addMarker(lat, lon, data[0].display_name, 'red');
       }
     });
 });
@@ -1094,5 +1224,5 @@ ${css}
   // Hook into drag/resize end to save session
   document.addEventListener('mouseup', () => { if (_sessionAi) saveSession() })
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()

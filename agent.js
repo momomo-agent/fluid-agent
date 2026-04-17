@@ -456,6 +456,20 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       },
       open_browser: ({ url }) => { WindowManager.openBrowser(url); showActivity(`🌐 Browser: ${url || 'home'}`); return { success: true } },
       open_map: ({ lat, lng, zoom }) => { WindowManager.openMap(lat, lng, zoom); showActivity(`🗺️ Map: ${lat || 'default'}, ${lng || ''}`); return { success: true } },
+      map_add_marker: ({ lat, lng, label, color }) => {
+        WindowManager.openMap() // ensure map is open
+        WindowManager.mapAddMarker(lat, lng, label, color)
+        showActivity(`📍 Marker: ${label || `${lat}, ${lng}`}`)
+        return { success: true }
+      },
+      map_clear_markers: () => { WindowManager.mapClearMarkers(); return { success: true } },
+      map_navigate: ({ from_lat, from_lng, to_lat, to_lng }) => {
+        WindowManager.openMap()
+        WindowManager.mapShowRoute({ lat: from_lat, lng: from_lng }, { lat: to_lat, lng: to_lng })
+        showActivity(`🚣 Route: ${from_lat.toFixed(2)},${from_lng.toFixed(2)} → ${to_lat.toFixed(2)},${to_lng.toFixed(2)}`)
+        return { success: true }
+      },
+      map_clear_route: () => { WindowManager.mapClearRoute(); return { success: true } },
       browser_navigate: ({ url }) => {
         window.dispatchEvent(new CustomEvent('browser-control', { detail: { action: 'navigate', url } }))
         showActivity(`🌐 Navigate: ${url}`)
@@ -558,6 +572,10 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       play_music: { desc: 'Control the music player. Actions: play, pause, next, prev, open', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'open'] }, track: { type: 'number', description: '0-based track index to play' } }, required: ['action'] } },
       open_browser: { desc: 'Open a web browser window, optionally navigating to a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'URL to navigate to' } } } },
       open_map: { desc: 'Open the map app, optionally centered on coordinates', schema: { type: 'object', properties: { lat: { type: 'number', description: 'Latitude' }, lng: { type: 'number', description: 'Longitude' }, zoom: { type: 'number', description: 'Zoom level (1-19)' } } } },
+      map_add_marker: { desc: 'Add a colored pin/marker to the map with an optional label', schema: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' }, label: { type: 'string', description: 'Popup text for the marker' }, color: { type: 'string', enum: ['red', 'blue', 'green', 'orange', 'purple', 'pink', 'yellow'], description: 'Marker color' } }, required: ['lat', 'lng'] } },
+      map_clear_markers: { desc: 'Remove all markers from the map', schema: { type: 'object', properties: {} } },
+      map_navigate: { desc: 'Show a driving route between two points on the map (uses OSRM). Shows distance and duration.', schema: { type: 'object', properties: { from_lat: { type: 'number' }, from_lng: { type: 'number' }, to_lat: { type: 'number' }, to_lng: { type: 'number' } }, required: ['from_lat', 'from_lng', 'to_lat', 'to_lng'] } },
+      map_clear_route: { desc: 'Clear the navigation route from the map', schema: { type: 'object', properties: {} } },
       browser_navigate: { desc: 'Navigate the browser to a URL. Opens browser if not open.', schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
       browser_back: { desc: 'Go back to browser home page', schema: { type: 'object', properties: {} } },
       play_video: { desc: 'Open video player with a URL', schema: { type: 'object', properties: { url: { type: 'string', description: 'Video URL (YouTube embed, mp4, etc)' }, title: { type: 'string' } } } },
@@ -636,7 +654,7 @@ You have deep control over every application:
 - Editor: open_file (opens in code editor with syntax highlighting)
 - Terminal: open_terminal (visual), run_terminal (execute command and get output)
 - Browser: open_browser, browser_navigate (go to URL), browser_back
-- Map: open_map (interactive map with search, centered on coordinates)
+- Map: open_map (interactive map with search), map_add_marker (colored pins with labels), map_clear_markers, map_navigate (driving route between two points with distance/duration), map_clear_route
 - Music: play_music (play/pause/next/prev, pick track by index)
 - Video: play_video (open with URL), video_control (play/pause/fullscreen)
 - Windows: open_finder, open_image, close_window, focus_window, list_windows
