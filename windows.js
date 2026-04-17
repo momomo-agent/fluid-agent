@@ -725,6 +725,27 @@ const WindowManager = (() => {
         <input class="settings-input" id="s-tavily" type="text" placeholder="tvly-..." value="${saved.tavilyKey || ''}">
       </div>
       <div class="settings-divider"></div>
+      <div class="settings-group-title">Movies</div>
+      <div class="settings-section">
+        <div class="settings-label">TMDB API Key (for movie/TV search)</div>
+        <input class="settings-input" id="s-tmdb" type="text" placeholder="TMDB v3 API key" value="${saved.tmdbKey || ''}">
+        <div class="settings-hint">Free at themoviedb.org</div>
+      </div>
+      <div class="settings-divider"></div>
+      <div class="settings-group-title">Image Generation</div>
+      <div class="settings-section">
+        <div class="settings-label">Image API Base URL</div>
+        <input class="settings-input" id="s-imgbase" type="text" placeholder="https://api.openai.com" value="${saved.imageBaseUrl || ''}">
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">Image API Key</div>
+        <input class="settings-input" id="s-imgkey" type="text" placeholder="sk-..." value="${saved.imageApiKey || ''}">
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">Image Model</div>
+        <input class="settings-input" id="s-imgmodel" type="text" placeholder="dall-e-3" value="${saved.imageModel || ''}">
+      </div>
+      <div class="settings-divider"></div>
       <div class="settings-group-title">Voice</div>
       <div class="settings-section">
         <label class="settings-toggle"><input type="checkbox" id="s-voice" ${saved.voice ? 'checked' : ''}> Enable voice (Web Speech API free, or ElevenLabs premium)</label>
@@ -748,6 +769,10 @@ const WindowManager = (() => {
         baseUrl: body.querySelector('#s-baseurl').value,
         voice: body.querySelector('#s-voice').checked,
         tavilyKey: body.querySelector('#s-tavily').value,
+        tmdbKey: body.querySelector('#s-tmdb').value,
+        imageBaseUrl: body.querySelector('#s-imgbase').value,
+        imageApiKey: body.querySelector('#s-imgkey').value,
+        imageModel: body.querySelector('#s-imgmodel').value,
         elevenLabsKey: body.querySelector('#s-elkey').value,
         elevenLabsVoice: body.querySelector('#s-elvoice').value,
       }

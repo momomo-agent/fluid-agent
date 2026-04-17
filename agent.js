@@ -637,6 +637,17 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       web_fetch: { desc: 'Fetch and read web page content from a URL', schema: { type: 'object', properties: { url: { type: 'string' }, max_chars: { type: 'number' } }, required: ['url'] } },
     }
 
+    // --- Merge External Skills (from Visual Talk) ---
+    const _getConfig = () => {
+      const s = window._settingsCache || {}
+      return { tavilyKey: s.tavilyKey, tmdbKey: s.tmdbKey, imageApiKey: s.imageApiKey, imageBaseUrl: s.imageBaseUrl, imageModel: s.imageModel, proxyUrl: 'https://proxy.link2web.site' }
+    }
+    if (typeof ExternalSkills !== 'undefined') {
+      const ext = ExternalSkills.register(_getConfig)
+      Object.assign(toolDefs, ext.defs)
+      Object.assign(toolHandlers, ext.handlers)
+    }
+
     // Mark first step as running
     if (steps.length > 0) { steps[0].status = 'running'; WindowManager.updateTask(task) }
 
