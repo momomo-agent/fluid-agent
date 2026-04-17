@@ -140,8 +140,10 @@ const Agent = (() => {
     return { tools, handlers }
   }
 
-  function configure(provider, apiKey, model, baseUrl) {
-    const opts = { provider, apiKey, proxyUrl: 'https://proxy.link2web.site', store: { name: 'fluid-agent' } }
+  function configure(provider, apiKey, model, baseUrl, storeInstance) {
+    const opts = { provider, apiKey, proxyUrl: 'https://proxy.link2web.site' }
+    if (storeInstance) opts.store = { instance: storeInstance }
+    else opts.store = { name: 'fluid-agent' }
     opts.model = model || (provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o')
     if (baseUrl) opts.baseUrl = baseUrl
     const AgenticClass = typeof Agentic === 'function' ? Agentic : Agentic.Agentic
@@ -597,7 +599,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       },
       web_search: async ({ query, search_depth }) => {
         showActivity(`🔍 Searching: ${query.slice(0, 40)}...`)
-        const settings = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
+        const settings = window._store ? (await window._store.get('settings')) || {} : {}
         const key = settings.tavilyKey
         if (!key) return { error: 'No Tavily API key configured. Open Settings to add one.' }
         try {

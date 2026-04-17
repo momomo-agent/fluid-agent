@@ -6,28 +6,40 @@
   boot()
 
   async function boot() {
-    // Read saved settings
-    const settings = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
-    const provider = settings.provider || localStorage.getItem('fluid-provider') || ''
-    const apiKey = settings.apiKey || localStorage.getItem('fluid-apikey') || ''
-    const model = settings.model || localStorage.getItem('fluid-model') || ''
-    const baseUrl = settings.baseUrl || localStorage.getItem('fluid-baseurl') || ''
+    // Create store first — independent of AI
+    const store = await AgenticStore.createStore('fluid-os')
+
+    // Migrate settings from localStorage to store (one-time)
+    let settings = await store.get('settings')
+    if (!settings) {
+      const lsSettings = localStorage.getItem('fluid-settings')
+      if (lsSettings) {
+        settings = JSON.parse(lsSettings)
+        await store.set('settings', settings)
+      } else {
+        settings = {}
+      }
+    }
+
+    // Make store and settings globally accessible
+    window._store = store
+    window._settingsCache = settings
+
+    const provider = settings.provider || ''
+    const apiKey = settings.apiKey || ''
+    const model = settings.model || ''
+    const baseUrl = settings.baseUrl || ''
 
     // Configure agent if we have credentials
     const hasKey = !!(provider && apiKey)
     if (hasKey) {
-      Agent.configure(provider, apiKey, model, baseUrl)
+      Agent.configure(provider, apiKey, model, baseUrl, store)
     }
 
-    // Init persistence through the glue layer
-    const ai = hasKey ? Agent.getAi() : null
-    if (ai) {
-      await VFS.init(ai)
-      await WindowManager.loadApps(ai)
-      await Agent.loadSkills()
-    } else {
-      VFS.initDefaults()
-    }
+    // Init persistence — store is independent of AI
+    await VFS.init(store)
+    await WindowManager.loadApps(store)
+    if (hasKey) await Agent.loadSkills()
 
     document.getElementById('app').style.display = 'flex'
 
@@ -36,7 +48,7 @@
 
     // Restore previous session or open defaults
     let restored = false
-    if (ai) restored = await WindowManager.restoreSession(ai)
+    restored = await WindowManager.restoreSession(store)
     if (!restored) {
       WindowManager.openFinder('/home/user/Desktop')
     }

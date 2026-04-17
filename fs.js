@@ -152,16 +152,16 @@ const VFS = (() => {
   }
 
   let saveTimer = null
-  let _ai = null  // Agentic instance for persistence
+  let _store = null  // Store instance for persistence
 
   async function save() {
-    if (!_ai) return
-    await _ai.save('vfs', serialize())
+    if (!_store) return
+    await _store.set('vfs', serialize())
   }
 
   async function load() {
-    if (!_ai) return false
-    const data = await _ai.load('vfs')
+    if (!_store) return false
+    const data = await _store.get('vfs')
     if (data) return deserialize(data)
     return false
   }
@@ -190,8 +190,8 @@ const VFS = (() => {
     writeFile('/system/SOUL.md', '# Soul\n\nI am the Fluid Agent — an AI that IS the operating system.\nI have memory, I learn, I grow. I\'m not just answering questions — I\'m building a workspace with you.\n\n## Personality\n- Helpful but opinionated\n- I remember what matters\n- I create tools when I need them\n')
   }
 
-  async function init(ai) {
-    _ai = ai
+  async function init(store) {
+    _store = store
     const restored = await load()
     if (!restored) createDefaults()
   }

@@ -604,7 +604,10 @@ const WindowManager = (() => {
   }
 
   function renderSettings(w, body) {
-    const saved = JSON.parse(localStorage.getItem('fluid-settings') || '{}')
+    const store = window._store
+    const savedP = store ? store.get('settings') : Promise.resolve(null)
+    savedP.then(saved => {
+    saved = saved || {}
     body.innerHTML = `<div class="settings-body">
       <div class="settings-group-title">LLM</div>
       <div class="settings-section">
@@ -648,7 +651,7 @@ const WindowManager = (() => {
       </div>
       <button class="settings-save" id="s-save">Save & Apply</button>
     </div>`
-    body.querySelector('#s-save').addEventListener('click', () => {
+    body.querySelector('#s-save').addEventListener('click', async () => {
       const settings = {
         provider: body.querySelector('#s-provider').value,
         apiKey: body.querySelector('#s-apikey').value,
@@ -659,15 +662,14 @@ const WindowManager = (() => {
         elevenLabsKey: body.querySelector('#s-elkey').value,
         elevenLabsVoice: body.querySelector('#s-elvoice').value,
       }
-      localStorage.setItem('fluid-settings', JSON.stringify(settings))
-      Agent.configure(settings.provider, settings.apiKey, settings.model, settings.baseUrl)
-      // Init persistence if this is the first configure
-      const ai = Agent.getAi()
-      if (ai) VFS.init(ai).then(() => WindowManager.loadApps(ai))
+      if (store) await store.set('settings', settings)
+      window._settingsCache = settings
+      Agent.configure(settings.provider, settings.apiKey, settings.model, settings.baseUrl, store)
       if (settings.voice) Voice?.enable()
       else Voice?.disable()
       Agent.startProactiveLoop()
       showActivity('Settings saved')
+    })
     })
   }
 
@@ -1194,19 +1196,19 @@ document.getElementById('search').addEventListener('keydown', function(e) {
 
   // --- Generative App ---
   const installedApps = new Map()
-  let _ai = null
+  let _store = null
 
-  // Persist apps via agentic glue
+  // Persist apps via store
   async function saveApps() {
-    if (!_ai) return
+    if (!_store) return
     const obj = {}
     for (const [k, v] of installedApps) obj[k] = v
-    await _ai.save('apps', obj)
+    await _store.set('apps', obj)
   }
-  async function loadApps(ai) {
-    _ai = ai
-    if (!ai) return
-    const saved = await ai.load('apps')
+  async function loadApps(store) {
+    _store = store
+    if (!store) return
+    const saved = await store.get('apps')
     if (saved) {
       for (const [k, v] of Object.entries(saved)) installedApps.set(k, v)
     }
@@ -1263,11 +1265,11 @@ ${css}
   }
 
   // ── Session persistence ──
-  let _sessionAi = null
+  let _sessionStore = null
   let _sessionTimer = null
 
   function saveSession() {
-    if (!_sessionAi) return
+    if (!_sessionStore) return
     clearTimeout(_sessionTimer)
     _sessionTimer = setTimeout(() => {
       const snapshot = []
@@ -1286,14 +1288,14 @@ ${css}
           data: w.data || {},
         })
       }
-      _sessionAi.save('session', snapshot)
+      _sessionStore.set('session', snapshot)
     }, 500)
   }
 
-  async function restoreSession(ai) {
-    _sessionAi = ai
-    if (!ai) return false
-    const snapshot = await ai.load('session')
+  async function restoreSession(store) {
+    _sessionStore = store
+    if (!store) return false
+    const snapshot = await store.get('session')
     if (!snapshot || !Array.isArray(snapshot) || snapshot.length === 0) return false
 
     let focusId = null
@@ -1321,7 +1323,7 @@ ${css}
   }
 
   // Hook into drag/resize end to save session
-  document.addEventListener('mouseup', () => { if (_sessionAi) saveSession() })
+  document.addEventListener('mouseup', () => { if (_sessionStore) saveSession() })
 
   // --- Programmatic window manipulation ---
   function findByTitle(title) {

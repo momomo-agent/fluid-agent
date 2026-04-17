@@ -7,7 +7,7 @@ const Voice = (() => {
   let mode = 'none' // 'elevenlabs' | 'webspeech' | 'none'
 
   function getSettings() {
-    return JSON.parse(localStorage.getItem('fluid-settings') || '{}')
+    return window._settingsCache || {}
   }
 
   function initElevenLabs() {
