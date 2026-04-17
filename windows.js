@@ -1135,7 +1135,9 @@ const WindowManager = (() => {
 
   function renderBrowser(w, body) {
     const url = w.data?.url || ''
-    const displayUrl = url || 'about:blank'
+    const displayUrl = w.data?.displayUrl || url || 'about:blank'
+    // Proxy external URLs to strip X-Frame-Options/CSP headers
+    const proxyUrl = url ? `https://proxy.link2web.site/raw?url=${encodeURIComponent(url)}` : ''
 
     body.innerHTML = `<div class="browser-window">
       <div class="browser-toolbar">
@@ -1146,8 +1148,8 @@ const WindowManager = (() => {
           <input class="browser-url-input" value="${displayUrl}" />
         </div>
       </div>
-      <div class="browser-content">${url
-        ? `<iframe src="${url}" style="width:100%;height:100%;border:none" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>`
+      <div class="browser-content">${proxyUrl
+        ? `<iframe src="${proxyUrl}" style="width:100%;height:100%;border:none" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>`
         : `<div class="browser-home">
             <div class="browser-home-logo">🌐</div>
             <div class="browser-home-title">FluidOS Browser</div>
@@ -1165,7 +1167,7 @@ const WindowManager = (() => {
     const navigate = (newUrl) => {
       let u = newUrl.trim()
       if (u && !u.match(/^https?:\/\//)) u = 'https://' + u
-      w.data = { ...w.data, url: u }
+      w.data = { ...w.data, url: u, displayUrl: u }
       w.el.querySelector('.window-title').textContent = u ? new URL(u).hostname : 'Browser'
       renderBrowser(w, body)
     }
