@@ -75,24 +75,39 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'SF P
 /* ── Dock ── */
 #dock {
   position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
-  height: 62px; display: flex; align-items: center; justify-content: center; gap: 0;
+  height: 62px; display: flex; align-items: flex-end; justify-content: center; gap: 0;
   background: rgba(255,255,255,0.25); backdrop-filter: blur(40px) saturate(1.8);
   border: 1px solid rgba(255,255,255,0.45);
   border-radius: 18px; flex-shrink: 0;
-  padding: 0 10px; z-index: 9998;
+  padding: 0 10px 6px; z-index: 9998;
   box-shadow: 0 0 0 0.5px rgba(0,0,0,0.06), 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
 }
-.dock-pinned, .dock-running { display: flex; align-items: center; gap: 2px; }
-.dock-separator { width: 1px; height: 32px; background: rgba(0,0,0,0.1); margin: 0 6px; flex-shrink: 0; }
+.dock-pinned, .dock-running { display: flex; align-items: flex-end; gap: 2px; }
+.dock-separator { width: 1px; height: 32px; background: rgba(0,0,0,0.1); margin: 0 6px; flex-shrink: 0; align-self: center; }
 .dock-item {
   width: 46px; height: 46px; display: flex; align-items: center; justify-content: center;
   font-size: 34px; border-radius: 12px; cursor: pointer;
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.15s;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.15s;
   position: relative; flex-direction: column;
   background: transparent;
+  transform-origin: bottom center;
 }
-.dock-item:hover { transform: scale(1.4) translateY(-14px); filter: brightness(1.05); }
-.dock-item:active { transform: scale(1.2) translateY(-6px); }
+/* Fisheye dock effect — pure CSS with :has() + adjacent sibling selectors */
+.dock-item:hover {
+  transform: scale(1.5);
+  filter: brightness(1.05);
+}
+/* Direct neighbors: ±1 */
+.dock-item:has(+ .dock-item:hover),
+.dock-item:hover + .dock-item {
+  transform: scale(1.25);
+}
+/* Two away: ±2 */
+.dock-item:has(+ .dock-item + .dock-item:hover),
+.dock-item:hover + .dock-item + .dock-item {
+  transform: scale(1.1);
+}
+.dock-item:active { transform: scale(1.2); }
 .dock-item.minimized { opacity: 0.45; }
 .dock-running-dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(0,0,0,0.4); position: absolute; bottom: -2px; }
 
