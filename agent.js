@@ -33,7 +33,7 @@ const Agent = (() => {
 
     try {
       const chatText = toSummarize.map(m => `${m.role}: ${(m.content || '').slice(0, 200)}`).join('\n')
-      const resp = await ai.chat(
+      const resp = await ai.think(
         `Summarize this conversation history into key facts, decisions, and context that should be preserved:\n\n${chatText}`,
         {
           system: 'You are a memory summarizer. Extract the essential facts, user preferences, decisions made, and important context from this conversation. Output a concise bullet-point summary. Focus on what would be useful for future conversations.',
@@ -287,7 +287,7 @@ const Agent = (() => {
     try {
       const memPath = '/system/memory/MEMORY.md'
       const currentMem = VFS.isFile(memPath) ? VFS.readFile(memPath) : ''
-      const resp = await ai.chat(
+      const resp = await ai.think(
         `User said: "${userMsg.slice(0, 300)}"\nYou replied: "${agentReply.slice(0, 300)}"\n\nCurrent memory:\n${currentMem.slice(0, 500)}`,
         {
           system: `You are the memory system of Fluid Agent OS. Decide if this exchange contains something worth remembering long-term: user preferences, facts about the user, project context, important decisions, or lessons learned.\n\nRespond with JSON only:\n{"remember": false}\nor\n{"remember": true, "section": "About You|Preferences|Projects|Lessons Learned", "entry": "concise fact to remember"}\n\nBe selective. Only remember genuinely useful facts. Don't remember greetings, small talk, or transient requests.`,
@@ -740,7 +740,7 @@ When finished, call the done tool with a detailed summary of what you found/did 
       try {
         const os = getOsState()
         const recentChat = messages.slice(-4).map(m => `${m.role}: ${m.content?.slice(0, 100)}`).join('\n')
-        const resp = await ai.chat(
+        const resp = await ai.think(
           'Check if you should proactively message the user. Consider: task completions, suggestions based on what they were doing, interesting observations, or just a friendly check-in if it\'s been quiet.',
           {
             system: `You are Fluid Agent OS's proactive awareness system.
@@ -807,7 +807,7 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
       const bubble = createStreamBubble()
       let fullReply = ''
 
-      await ai.chat(
+      await ai.think(
         `[TASK COMPLETED] Task: "${taskDesc}"\nWorker summary: ${summary || '(none)'}\nWork log:\n${logSummary}\n\nReport the results back to the user naturally, as if you just finished doing something for them. Be concise and informative.`,
         {
           system: `You are Fluid Agent. You just finished a background task. Report the results back to the user in the conversation. Be natural — like a friend saying "hey, done with that thing you asked for, here's what I found/did". Keep it concise. Include the key results/findings.`,
