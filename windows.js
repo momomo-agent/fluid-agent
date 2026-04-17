@@ -500,7 +500,7 @@ const WindowManager = (() => {
         <div class="tm-detail-goal">${selected.goal}</div>
         <div class="tm-steps">${selected.steps.map(s => `
           <div class="tm-step ${s.status}">
-            <span class="tm-step-icon">${s.status === 'done' ? '✓' : s.status === 'running' ? '▶' : s.status === 'aborted' ? '✕' : '○'}</span>
+            <span class="tm-step-icon">${s.status === 'done' ? '✓' : s.status === 'running' ? '▶' : s.status === 'aborted' ? '✕' : s.status === 'error' ? '✕' : '○'}</span>
             <span>${s.text}</span>
           </div>`).join('')}
         </div>

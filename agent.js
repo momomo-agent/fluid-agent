@@ -731,7 +731,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     }
 
     function makeExecutor(name) {
-      return (params) => {
+      return async (params) => {
         if (abort.signal.aborted) throw new Error('aborted')
         blackboard.workerLog.push({ tool: name, params, time: Date.now() })
         task.log.push(`${name}: ${JSON.stringify(params).slice(0, 60)}`)
@@ -739,7 +739,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
           task.log.push(`↪ Steered: ${blackboard.directive.instruction}`)
           blackboard.directive = null
         }
-        const result = allHandlers[name]?.(params) || { error: `Unknown tool: ${name}` }
+        const result = await (allHandlers[name]?.(params) || { error: `Unknown tool: ${name}` })
         WindowManager.updateTask(task)
         if (result.done) {
           task.status = 'done'
@@ -805,7 +805,7 @@ When finished, call the done tool with a detailed summary of what you found/did 
         task.status = 'done'
         blackboard.currentTask.status = 'done'
         setWorkerStatus('✅ Done')
-        steps.forEach(s => { if (s.status === 'pending') s.status = 'done' })
+        steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
         WindowManager.updateTask(task)
         reportTaskResult(taskDescription, '', task.log)
         setTimeout(() => setWorkerStatus(''), 3000)
@@ -825,6 +825,7 @@ When finished, call the done tool with a detailed summary of what you found/did 
         setWorkerStatus('❌ Error')
         showActivity(`Error: ${err.message}`)
         addBubble('system', `Worker error: ${err.message}`)
+        steps.forEach(s => { if (s.status !== 'done') s.status = 'error' })
         WindowManager.updateTask(task)
       }
     }
