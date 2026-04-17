@@ -235,7 +235,7 @@ const Agent = (() => {
       const action = parseAction(fullReply)
       if (action?.action === 'execute' || action?.action === 'redirect') {
         bubble.textContent = action.reply || cleanReply(fullReply)
-        enqueueTask(action.task || userMessage, action.steps)
+        enqueueTask(action.task || userMessage, action.steps, action.priority ?? 1)
       } else if (action?.action === 'steer') {
         bubble.textContent = action.reply || cleanReply(fullReply)
         blackboard.directive = { type: 'steer', instruction: action.instruction }
@@ -358,9 +358,9 @@ Current OS state:
 
     sys += `\n\nWhen the user wants you to DO something (not just talk), use action blocks:
 
-1. EXECUTE a task:
+1. EXECUTE a task (priority: 0=urgent, 1=normal, 2=background):
 \`\`\`json
-{"action": "execute", "reply": "your conversational reply", "task": "what to do", "steps": ["step 1", "step 2"]}
+{"action": "execute", "reply": "your conversational reply", "task": "what to do", "steps": ["step 1", "step 2"], "priority": 1}
 \`\`\`
 
 2. STEER a running task:
@@ -393,10 +393,16 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     try { return JSON.parse(m[1]) } catch { return null }
   }
 
-  function enqueueTask(taskDescription, steps) {
-    taskQueue.push({ taskDescription, steps })
+  // --- Priority task queue ---
+  // priority: 0=urgent, 1=normal (default), 2=background
+  function enqueueTask(taskDescription, steps, priority = 1) {
+    taskQueue.push({ taskDescription, steps, priority })
+    taskQueue.sort((a, b) => a.priority - b.priority)
     if (!workerRunning) drainQueue()
-    else showActivity(`Queued: ${taskDescription.slice(0, 40)}...`)
+    else {
+      const label = priority === 0 ? '⚡' : priority === 2 ? '💤' : '📥'
+      showActivity(`${label} Queued: ${taskDescription.slice(0, 40)}...`)
+    }
   }
 
   async function drainQueue() {
@@ -638,39 +644,83 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     // Mark first step as running
     if (steps.length > 0) { steps[0].status = 'running'; WindowManager.updateTask(task) }
 
+    // --- Tool Search: deferred tool loading ---
+    const coreToolNames = new Set(['create_file', 'read_file', 'list_directory', 'run_command', 'done', 'update_progress', 'search_tools'])
+    const loadedTools = new Set([...coreToolNames])
+
+    const toolCatalog = Object.fromEntries(
+      Object.entries(toolDefs).map(([name, { desc }]) => [name, desc])
+    )
+
+    // search_tools meta-tool
+    toolHandlers.search_tools = ({ query, names }) => {
+      if (names && Array.isArray(names)) {
+        const loaded = []
+        for (const n of names) {
+          if (allToolDefs[n]) { loadedTools.add(n); loaded.push(n) }
+        }
+        return { loaded, available: loaded.length > 0 }
+      }
+      const q = (query || '').toLowerCase()
+      const matches = Object.entries(toolCatalog)
+        .filter(([name, desc]) => name.includes(q) || desc.toLowerCase().includes(q))
+        .map(([name, desc]) => ({ name, desc, loaded: loadedTools.has(name) }))
+        .slice(0, 10)
+      return { results: matches, hint: 'Call search_tools with names:[...] to load specific tools' }
+    }
+    toolDefs.search_tools = {
+      desc: 'Search and load tools by keyword or exact names. Core tools (create_file, read_file, list_directory, run_command) are always available. Use this to discover and activate additional tools.',
+      schema: { type: 'object', properties: {
+        query: { type: 'string', description: 'Keyword to search tool names/descriptions' },
+        names: { type: 'array', items: { type: 'string' }, description: 'Exact tool names to load' }
+      }}
+    }
+
+    const extendedToolList = Object.entries(toolCatalog)
+      .filter(([name]) => !coreToolNames.has(name))
+      .map(([name, desc]) => `  - ${name}: ${desc}`)
+      .join('\n')
+
     // Merge custom skill tools
     const skillTools = getSkillTools()
     const allToolDefs = { ...toolDefs, ...skillTools.tools }
     const allHandlers = { ...toolHandlers, ...skillTools.handlers }
+    for (const [name, { desc }] of Object.entries(skillTools.tools)) {
+      toolCatalog[name] = desc
+    }
 
-    const tools = Object.entries(allToolDefs).map(([name, { desc, schema }]) => ({
-      name, description: desc, input_schema: schema,
-      execute: (params) => {
+    function makeExecutor(name) {
+      return (params) => {
         if (abort.signal.aborted) throw new Error('aborted')
         blackboard.workerLog.push({ tool: name, params, time: Date.now() })
         task.log.push(`${name}: ${JSON.stringify(params).slice(0, 60)}`)
-
-        // Check for steer directive
         if (blackboard.directive?.type === 'steer') {
           task.log.push(`↪ Steered: ${blackboard.directive.instruction}`)
           blackboard.directive = null
         }
-
-        const result = allHandlers[name]?.(params) || toolHandlers[name]?.(params) || { error: `Unknown tool: ${name}` }
+        const result = allHandlers[name]?.(params) || { error: `Unknown tool: ${name}` }
         WindowManager.updateTask(task)
-
         if (result.done) {
           task.status = 'done'
           blackboard.currentTask.status = 'done'
           setWorkerStatus(taskQueue.length > 0 ? `⏳ ${taskQueue.length} queued` : '✅ Done')
           steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
           WindowManager.updateTask(task)
-          // Report back to conversation with results
           reportTaskResult(taskDescription, result.summary || '', task.log)
         }
         return result
       }
-    }))
+    }
+
+    function getActiveTools() {
+      return Object.entries(allToolDefs)
+        .filter(([name]) => loadedTools.has(name))
+        .map(([name, { desc, schema }]) => ({
+          name, description: desc, input_schema: schema, execute: makeExecutor(name)
+        }))
+    }
+
+    const tools = getActiveTools()
 
     try {
       const os = getOsState()
@@ -688,21 +738,14 @@ Current OS state:
 Planned steps:
 ${steps.map((s, i) => `${i}. ${s.text}`).join('\n')}
 
-You have deep control over every application:
-- Files: create_file, read_file, list_directory, run_command
-- Editor: open_file (opens in code editor with syntax highlighting)
-- Terminal: open_terminal (visual), run_terminal (execute command and get output)
-- Browser: open_browser, browser_navigate (go to URL), browser_back
-- Web: web_search (Tavily search for real-world info), web_fetch (read any URL content)
-- Map: open_map (interactive map with search), map_add_marker (colored pins with labels), map_clear_markers, map_navigate (driving route between two points with distance/duration), map_clear_route
-- Music: play_music (play/pause/next/prev, pick track by index)
-- Video: play_video (open with URL), video_control (play/pause/fullscreen)
-- Windows: open_finder, open_image, close_window, focus_window, list_windows
-- Generative Apps: create_app (build any UI with HTML/CSS/JS), update_app, uninstall_app, list_apps
-  Apps get installed in the dock and can be re-opened. Build anything: calculators, games, dashboards, maps, tools.
-  Apps can load external CDN libraries (Leaflet, D3, Chart.js, Three.js, etc.) via <script src="..."> or <link> tags in the HTML.
-- Skills (self-evolution): create_skill, list_skills, read_skill, delete_skill
-  Skills are reusable tools you create. They persist across sessions and auto-load.
+## Tool System
+You have core tools always available: create_file, read_file, list_directory, run_command, update_progress, done.
+
+For additional capabilities, use search_tools to discover and load tools:
+${extendedToolList}
+
+Call search_tools({names: ["tool_name"]}) to load specific tools, or search_tools({query: "keyword"}) to search.
+Once loaded, tools stay available for the rest of this task.
   Create a skill when you discover a useful pattern worth saving permanently.
   Each skill has: name, description, JSON schema, and a JS handler function.
 

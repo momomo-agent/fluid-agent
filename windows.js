@@ -5,22 +5,67 @@ const WindowManager = (() => {
   const windows = new Map()
   const area = () => document.getElementById('desktop-area')
 
-  let cascadeOffset = 0
+  // --- Smart window placement: find least-overlapping position ---
+  function findBestPosition(ww, wh, areaW, areaH) {
+    const existing = []
+    for (const [, win] of windows) {
+      if (win.el.classList.contains('minimized') || win.el.classList.contains('fullscreen')) continue
+      existing.push({
+        x: win.el.offsetLeft, y: win.el.offsetTop,
+        w: win.el.offsetWidth, h: win.el.offsetHeight
+      })
+    }
+    if (existing.length === 0) {
+      // Center first window
+      return { x: Math.max(20, (areaW - ww) / 2), y: Math.max(20, (areaH - wh) / 3) }
+    }
+    // Try candidate positions: grid + offsets from existing windows
+    const candidates = []
+    const step = 60
+    for (let gx = 20; gx <= areaW - ww; gx += step) {
+      for (let gy = 20; gy <= areaH - wh; gy += step) {
+        candidates.push({ x: gx, y: gy })
+      }
+    }
+    // Also try positions offset from existing windows
+    for (const e of existing) {
+      candidates.push({ x: e.x + e.w + 20, y: e.y })
+      candidates.push({ x: e.x, y: e.y + e.h + 20 })
+      candidates.push({ x: e.x + 30, y: e.y + 30 })
+    }
+    let best = { x: 40, y: 40 }
+    let bestScore = -Infinity
+    for (const c of candidates) {
+      if (c.x < 0 || c.y < 0 || c.x + ww > areaW || c.y + wh > areaH) continue
+      let overlap = 0
+      for (const e of existing) {
+        const ox = Math.max(0, Math.min(c.x + ww, e.x + e.w) - Math.max(c.x, e.x))
+        const oy = Math.max(0, Math.min(c.y + wh, e.y + e.h) - Math.max(c.y, e.y))
+        overlap += ox * oy
+      }
+      const score = -overlap
+      if (score > bestScore) { bestScore = score; best = c }
+    }
+    return best
+  }
 
   function create({ type, title, x, y, width, height, data }) {
     const id = 'win-' + nextId++
     const w = document.createElement('div')
     w.className = 'window'
     w.id = id
-    // Cascade windows so they don't stack exactly
     const area = document.getElementById('desktop-area')
     const areaW = area?.clientWidth || 800
     const areaH = area?.clientHeight || 600
     const ww = width || 500
     const wh = height || 350
-    let cx = (x || 60) + cascadeOffset * 30
-    let cy = (y || 40) + cascadeOffset * 30
-    cascadeOffset = (cascadeOffset + 1) % 6
+    let cx, cy
+    if (x !== undefined && y !== undefined) {
+      cx = x; cy = y
+    } else {
+      const pos = findBestPosition(ww, wh, areaW, areaH)
+      cx = pos.x; cy = pos.y
+    }
     // Clamp to desktop bounds
     cx = Math.max(0, Math.min(cx, areaW - Math.min(ww, areaW)))
     cy = Math.max(0, Math.min(cy, areaH - Math.min(wh, areaH)))
