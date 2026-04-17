@@ -141,9 +141,15 @@
       clearTimeout(hoverTimeout)
       updateTaskHoverPanel()
       taskHoverPanel.classList.remove('hidden')
+      if (taskStatusEl.classList.contains('island-active')) {
+        taskStatusEl.classList.add('island-expanded')
+      }
     })
     taskStatusWrap.addEventListener('mouseleave', () => {
-      hoverTimeout = setTimeout(() => taskHoverPanel.classList.add('hidden'), 200)
+      hoverTimeout = setTimeout(() => {
+        taskHoverPanel.classList.add('hidden')
+        taskStatusEl.classList.remove('island-expanded')
+      }, 200)
     })
     taskHoverPanel.addEventListener('mouseenter', () => clearTimeout(hoverTimeout))
     taskHoverPanel.addEventListener('mouseleave', () => {
@@ -188,18 +194,20 @@
     setInterval(() => {
       const bb = Agent.blackboard
       if (bb.currentTask && bb.currentTask.status === 'running') {
-        const goal = bb.currentTask.goal?.slice(0, 30) || 'Working...'
+        const goal = bb.currentTask.goal?.slice(0, 28) || 'Working...'
         const steps = bb.currentTask.steps || []
         const doneCount = steps.filter(s => s.status === 'done').length
         const total = steps.length
         const queued = Agent.getTaskQueue ? Agent.getTaskQueue().length : 0
-        const queueText = queued > 0 ? ` · +${queued}` : ''
+        const queueText = queued > 0 ? ` +${queued}` : ''
         const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0
         const progressBar = total > 0 ? `<div class="task-progress"><div class="task-progress-fill" style="width:${pct}%"></div></div>` : ''
         const stepText = total > 0 ? `${doneCount}/${total}` : ''
-        taskStatusEl.innerHTML = `<div class="spinner"></div> ${goal} ${stepText}${queueText} ${progressBar}`
+        taskStatusEl.innerHTML = `<div class="spinner"></div><span class="island-goal">${goal}</span><span class="island-meta">${stepText}${queueText}</span>${progressBar}`
+        taskStatusEl.classList.add('island-active')
       } else {
         taskStatusEl.innerHTML = ''
+        taskStatusEl.classList.remove('island-active', 'island-expanded')
       }
       // Update hover panel if visible
       if (!taskHoverPanel.classList.contains('hidden')) updateTaskHoverPanel()
