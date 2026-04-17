@@ -1421,5 +1421,43 @@ ${css}
     return true
   }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, moveWindow, resizeWindow, minimizeByTitle, maximizeByTitle, unminimizeByTitle, tileWindows, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
+  // --- Music: add track dynamically ---
+  const SYNTH_STYLES = {
+    dreamy:   { wave: 'sine',     filterFreq: 800,  attack: 0.05, release: 0.3,  tempo: 110, colors: ['#60a5fa','#818cf8','#a78bfa'] },
+    bright:   { wave: 'square',   filterFreq: 1200, attack: 0.01, release: 0.15, tempo: 135, colors: ['#fbbf24','#f59e0b','#fb923c'] },
+    gentle:   { wave: 'triangle', filterFreq: 600,  attack: 0.1,  release: 0.5,  tempo: 85,  colors: ['#34d399','#6ee7b7','#a7f3d0'] },
+    moody:    { wave: 'sawtooth', filterFreq: 900,  attack: 0.02, release: 0.25, tempo: 95,  colors: ['#f472b6','#e879f9','#c084fc'] },
+    playful:  { wave: 'triangle', filterFreq: 1500, attack: 0.01, release: 0.2,  tempo: 130, colors: ['#38bdf8','#22d3ee','#2dd4bf'] },
+  }
+  const SCALE_NOTES = ['C4','D4','E4','F4','G4','A4','B4','C5','D5','E5']
+  const BASS_NOTES = ['C3','D3','E3','F3','G3','A3']
+
+  function generateMelody(len) {
+    const m = []; for (let i = 0; i < len; i++) m.push(SCALE_NOTES[Math.floor(Math.random() * SCALE_NOTES.length)])
+    return m
+  }
+  function generateBass(len) {
+    const b = []; for (let i = 0; i < len; i++) b.push(BASS_NOTES[Math.floor(Math.random() * BASS_NOTES.length)])
+    return b
+  }
+
+  function musicAddTrack({ title, artist, style }) {
+    if (!title) return { error: 'title is required' }
+    const s = SYNTH_STYLES[style] || SYNTH_STYLES.dreamy
+    const trackDef = {
+      melody: generateMelody(16),
+      bass: generateBass(8),
+      tempo: s.tempo + Math.floor(Math.random() * 20 - 10),
+      wave: s.wave, filterFreq: s.filterFreq, attack: s.attack, release: s.release,
+    }
+    const synthIdx = AudioSynth.addTrack(trackDef)
+    const color = s.colors[Math.floor(Math.random() * s.colors.length)]
+    const entry = { title: title || 'Untitled', artist: artist || 'FluidOS', color, duration: Math.floor(AudioSynth.getDuration(synthIdx)) }
+    musicState.playlist.push(entry)
+    const idx = musicState.playlist.length - 1
+    musicRerender()
+    return { index: idx }
+  }
+
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, moveWindow, resizeWindow, minimizeByTitle, maximizeByTitle, unminimizeByTitle, tileWindows, musicAddTrack, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()

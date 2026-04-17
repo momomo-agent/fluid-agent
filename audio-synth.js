@@ -183,5 +183,11 @@ const AudioSynth = (() => {
 
   function isPlaying() { return playing }
 
-  return { play, stop, getDuration, isPlaying, TRACKS }
+  function addTrack(def) {
+    // def: { melody, bass, tempo, wave, filterFreq, attack, release }
+    TRACKS.push(def)
+    return TRACKS.length - 1
+  }
+
+  return { play, stop, getDuration, isPlaying, TRACKS, addTrack }
 })()

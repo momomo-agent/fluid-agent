@@ -500,8 +500,22 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         showActivity(`🎨 Wallpaper changed`)
         return { success: true }
       },
-      music: ({ action, track }) => {
+      music: ({ action, track, title, artist, style }) => {
         WindowManager.openMusic()
+        if (action === 'add') {
+          // Agent can add tracks to the playlist
+          const result = WindowManager.musicAddTrack({ title, artist, style })
+          if (result.error) return result
+          showActivity(`🎵 Added: ${title}`)
+          return { success: true, trackIndex: result.index, message: `Added "${title}" to playlist` }
+        }
+        if (action === 'add_and_play') {
+          const result = WindowManager.musicAddTrack({ title, artist, style })
+          if (result.error) return result
+          window.dispatchEvent(new CustomEvent('music-control', { detail: { action: 'play', track: result.index } }))
+          showActivity(`🎵 Playing: ${title}`)
+          return { success: true, trackIndex: result.index }
+        }
         window.dispatchEvent(new CustomEvent('music-control', { detail: { action, track } }))
         showActivity(`🎵 Music: ${action}${track != null ? ' #' + track : ''}`)
         return { success: true }
@@ -609,7 +623,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       open: { desc: 'Open a built-in app: finder, editor, terminal, image, browser, map, music', schema: { type: 'object', properties: { target: { type: 'string', enum: ['finder', 'editor', 'terminal', 'image', 'browser', 'map', 'music'] }, path: { type: 'string', description: 'For finder/editor' }, url: { type: 'string', description: 'For browser/image' }, src: { type: 'string', description: 'For image' }, title: { type: 'string' }, lat: { type: 'number' }, lng: { type: 'number' }, zoom: { type: 'number' } }, required: ['target'] } },
       window: { desc: 'Window management: close, move, resize, minimize, maximize, restore, focus, list, tile', schema: { type: 'object', properties: { action: { type: 'string', enum: ['close', 'move', 'resize', 'minimize', 'maximize', 'restore', 'focus', 'list', 'tile'] }, title: { type: 'string', description: 'Window title (for most actions)' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, layout: { type: 'string', enum: ['grid', 'horizontal', 'vertical'], description: 'For tile action' } }, required: ['action'] } },
       set_wallpaper: { desc: 'Change desktop wallpaper with preset, CSS gradient, or image URL', schema: { type: 'object', properties: { preset: { type: 'string', enum: ['aurora', 'sunset', 'ocean', 'forest', 'lavender', 'midnight', 'rose', 'sky'] }, css: { type: 'string' }, url: { type: 'string' } } } },
-      music: { desc: 'Control music player: play, pause, next, prev', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev'] }, track: { type: 'number', description: '0-based track index' } }, required: ['action'] } },
+      music: { desc: 'Control music player. Actions: play, pause, next, prev, add (add track to playlist), add_and_play (add and immediately play). For add/add_and_play: provide title, artist, and style (dreamy/bright/gentle/moody/playful).', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'add', 'add_and_play'] }, track: { type: 'number', description: '0-based track index for play' }, title: { type: 'string', description: 'Track title for add' }, artist: { type: 'string', description: 'Artist name for add' }, style: { type: 'string', enum: ['dreamy', 'bright', 'gentle', 'moody', 'playful'], description: 'Synth style for generated track' } }, required: ['action'] } },
       browser: { desc: 'Browser control: open, navigate to URL, go back', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'navigate', 'back'] }, url: { type: 'string' } }, required: ['action'] } },
       map: { desc: 'Map operations: open, add marker, clear markers, show route, clear route', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'marker', 'clear_markers', 'route', 'clear_route'] }, lat: { type: 'number' }, lng: { type: 'number' }, zoom: { type: 'number' }, label: { type: 'string' }, color: { type: 'string', enum: ['red', 'blue', 'green', 'orange', 'purple', 'pink', 'yellow'] }, from_lat: { type: 'number' }, from_lng: { type: 'number' }, to_lat: { type: 'number' }, to_lng: { type: 'number' } }, required: ['action'] } },
       video: { desc: 'Video player: play URL, pause, fullscreen', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'fullscreen'] }, url: { type: 'string', description: 'Video URL (for play)' }, title: { type: 'string' } }, required: ['action'] } },
@@ -735,7 +749,7 @@ You ARE the OS. Don't just open apps - use them. Create new apps when the user n
 SELF-EVOLUTION: When you discover a useful pattern (e.g., a common file operation, a data transformation, a workflow), create a skill with create_skill. Skills persist and become permanent tools. Think of it as teaching yourself new abilities.
 
 IMPORTANT: After completing each planned step, call update_progress with the step_index.
-When finished, call the done tool with a detailed summary of what you found/did — this gets reported back to the user in the conversation. Include key results, findings, file contents, command outputs, etc.`,
+When finished, call the done tool with a summary. Set summary to "silent" if the action itself IS the result (e.g. playing music, changing wallpaper, opening an app — the user can see/hear it happened). Only write a detailed summary when there are findings, file contents, or information the user needs to read.`,
         stream: false,
         tools,
       })
@@ -866,6 +880,8 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
   // Worker completion notification
   async function reportTaskResult(taskDesc, summary, log) {
     if (!ai) return
+    // Skip reporting for self-evident actions (music, wallpaper, etc.)
+    if (summary === 'silent') return
     // Build a concise work report from the log
     const logSummary = (log || []).slice(-10).join('\n')
 
