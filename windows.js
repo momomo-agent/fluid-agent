@@ -524,12 +524,20 @@ const WindowManager = (() => {
 
   function getState() {
     const focused = [...windows.values()].find(w => w.el.classList.contains('focused'))
+    const areaEl = document.getElementById('desktop-area')
     return {
+      desktop: { width: areaEl?.clientWidth || 0, height: areaEl?.clientHeight || 0 },
       windows: [...windows.values()].map(w => ({
         id: w.id,
         type: w.type,
         title: w.el.querySelector('.window-title')?.textContent || w.type,
         focused: w.el.classList.contains('focused'),
+        minimized: w.el.classList.contains('minimized'),
+        fullscreen: w.el.classList.contains('fullscreen'),
+        x: w.el.offsetLeft,
+        y: w.el.offsetTop,
+        width: w.el.offsetWidth,
+        height: w.el.offsetHeight,
         path: w.data?.path || null,
       })),
       focusedWindow: focused ? { type: focused.type, title: focused.el.querySelector('.window-title')?.textContent, path: focused.data?.path } : null,

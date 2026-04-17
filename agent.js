@@ -181,10 +181,15 @@ const Agent = (() => {
 
   function getOsState() {
     const state = WindowManager.getState()
-    const wins = state.windows.map(w => `${w.type}${w.path ? ':' + w.path : ''}${w.focused ? ' [focused]' : ''}`).join(', ') || 'none'
+    const wins = state.windows.map(w => {
+      const pos = `${w.x},${w.y} ${w.width}x${w.height}`
+      const flags = [w.focused && 'focused', w.minimized && 'min', w.fullscreen && 'max'].filter(Boolean).join(',')
+      return `${w.title}(${w.type}) [${pos}]${flags ? ' {' + flags + '}' : ''}`
+    }).join(' | ') || 'none'
     const apps = WindowManager.getInstalledApps()
     return {
       windows: wins,
+      desktopSize: state.desktop ? `${state.desktop.width}x${state.desktop.height}` : 'unknown',
       focused: state.focusedWindow ? `${state.focusedWindow.type}${state.focusedWindow.path ? ' (' + state.focusedWindow.path + ')' : ''}` : 'none',
       cwd: Shell.getCwd(),
       desktop: VFS.ls('/home/user/Desktop')?.map(f => f.name) || [],
@@ -342,6 +347,7 @@ You can control:
 - Create apps on the fly (HTML/CSS/JS → sandboxed window)
 
 Current OS state:
+- Desktop size: ${os.desktopSize}
 - Open windows: ${os.windows}
 - Focused window: ${os.focused}
 - Working directory: ${os.cwd}
@@ -742,6 +748,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         system: `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
 
 Current OS state:
+- Desktop size: ${os.desktopSize}
 - Open windows: ${os.windows}
 - Working directory: ${os.cwd}
 - Desktop files: ${JSON.stringify(os.desktop)}
@@ -841,6 +848,7 @@ When finished, call the done tool with a detailed summary of what you found/did 
             system: `You are Fluid Agent OS's proactive awareness system.
 
 Current state:
+- Desktop: ${os.desktopSize}
 - Windows: ${os.windows}
 - Installed apps: ${os.installedApps}
 - Time since last user message: ${Math.round((Date.now() - lastUserMessage) / 1000)}s
