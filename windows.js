@@ -54,9 +54,9 @@ const WindowManager = (() => {
     const w = document.createElement('div')
     w.className = 'window'
     w.id = id
-    const area = document.getElementById('desktop-area')
-    const areaW = area?.clientWidth || 800
-    const areaH = area?.clientHeight || 600
+    const desktopArea = document.getElementById('desktop-area')
+    const areaW = desktopArea?.clientWidth || 800
+    const areaH = desktopArea?.clientHeight || 600
     const ww = width || 500
     const wh = height || 350
     let cx, cy
@@ -157,7 +157,7 @@ const WindowManager = (() => {
     })
     document.addEventListener('mouseup', () => { resizeStart = null })
 
-    area().appendChild(w)
+    desktopArea.appendChild(w)
     const winObj = { id, type, el: w, data: data || {} }
     windows.set(id, winObj)
 
