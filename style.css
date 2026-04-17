@@ -80,15 +80,13 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'SF P
   position: absolute; min-width: 300px; min-height: 200px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); overflow: hidden;
-  transition: opacity 0.2s, transform 0.2s;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.2);
+  display: flex; flex-direction: column;
+  transition: box-shadow 0.2s, border-color 0.2s, opacity 0.2s, transform 0.2s;
+  animation: windowOpen 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .window.minimized { opacity: 0; transform: scale(0.5) translateY(100px); pointer-events: none; }
 .window.fullscreen { border-radius: 0; border: none; transition: all 0.25s ease; }
-  box-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.2);
-  display: flex; flex-direction: column;
-  transition: box-shadow 0.2s, border-color 0.2s;
-  animation: windowOpen 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
 @keyframes windowOpen {
   from { opacity: 0; transform: scale(0.9) translateY(12px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
@@ -114,7 +112,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'SF P
 .window-dot.maximize { background: var(--green); }
 .window:not(.focused) .window-dot { opacity: 0.4; }
 .window-title { font-size: 13px; font-weight: 500; color: var(--text-dim); flex: 1; text-align: center; }
-.window-body { flex: 1; overflow: auto; }
+.window-body { flex: 1; overflow: auto; min-height: 0; }
 .window-resize {
   position: absolute; bottom: 0; right: 0; width: 16px; height: 16px;
   cursor: nwse-resize; opacity: 0;
