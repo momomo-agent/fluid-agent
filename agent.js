@@ -326,7 +326,8 @@ const Agent = (() => {
             const text = typeof data === 'string' ? data : (data?.text || '')
             if (text) {
               fullReply += text
-              bubble.textContent = fullReply
+              // Strip JSON action blocks during streaming so user doesn't see raw JSON
+              bubble.textContent = cleanReply(fullReply)
               document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight
             }
           }
@@ -428,7 +429,13 @@ const Agent = (() => {
     } catch (e) { /* silent fail */ }
   }
 
-  function cleanReply(text) { return text.replace(/```json[\s\S]*?```/g, '').trim() }
+  function cleanReply(text) {
+    // Remove complete JSON blocks
+    let cleaned = text.replace(/```json[\s\S]*?```/g, '')
+    // Also remove incomplete JSON block still being streamed (opened but not closed)
+    cleaned = cleaned.replace(/```json[\s\S]*$/g, '')
+    return cleaned.trim()
+  }
 
   function buildTalkerSystem(os) {
     const runningTasks = blackboard.currentTask?.status === 'running' ? [blackboard.currentTask] : []
@@ -1019,7 +1026,7 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
           stream: true,
           onToken: (token) => {
             fullReply += token
-            bubble.textContent = fullReply
+            bubble.textContent = cleanReply(fullReply)
             bubble.parentElement.scrollTop = bubble.parentElement.scrollHeight
           },
         }
