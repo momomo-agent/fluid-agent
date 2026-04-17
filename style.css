@@ -569,12 +569,6 @@ select.settings-input { appearance: none; cursor: pointer; }
 #task-status .island-meta {
   font-size: 10px; color: rgba(255,255,255,0.5); flex-shrink: 0;
 }
-#task-status .task-progress {
-  width: 36px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.15); overflow: hidden; flex-shrink: 0;
-}
-#task-status .task-progress-fill {
-  height: 100%; border-radius: 2px; background: rgba(255,255,255,0.7); transition: width 0.3s ease;
-}
 #task-hover-panel {
   position: absolute; top: 100%; right: 0; margin-top: 6px;
   width: 340px; max-height: 440px; overflow-y: auto;

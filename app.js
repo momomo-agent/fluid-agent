@@ -229,10 +229,7 @@
         const total = steps.length
         const queued = Agent.getTaskQueue ? Agent.getTaskQueue().length : 0
         const queueText = queued > 0 ? ` +${queued}` : ''
-        const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0
-        const progressBar = total > 0 ? `<div class="task-progress"><div class="task-progress-fill" style="width:${pct}%"></div></div>` : ''
-        const stepText = total > 0 ? `${doneCount}/${total}` : ''
-        taskStatusEl.innerHTML = `<div class="spinner"></div><span class="island-goal">${goal}</span><span class="island-meta">${stepText}${queueText}</span>${progressBar}`
+        taskStatusEl.innerHTML = `<div class="spinner"></div><span class="island-goal">${goal}</span>${queueText ? `<span class="island-meta">${queueText}</span>` : ''}`
         taskStatusEl.classList.add('island-active')
       } else {
         taskStatusEl.innerHTML = ''
