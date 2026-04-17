@@ -519,7 +519,7 @@
       } catch (err) { console.warn('Drop failed:', err) }
     })
 
-    const micBtn = document.getElementById('mic-btn')
+    const micBtn = document.getElementById('voice-btn')
     if (micBtn) {
       let micActive = false
       micBtn.addEventListener('mousedown', () => {
