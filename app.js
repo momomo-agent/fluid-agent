@@ -138,6 +138,8 @@
     let hoverTimeout = null
 
     taskStatusWrap.addEventListener('mouseenter', () => {
+      // Don't show panel when island is empty (no active/queued/recent tasks)
+      if (!taskStatusEl.innerHTML.trim()) return
       clearTimeout(hoverTimeout)
       updateTaskHoverPanel()
       taskHoverPanel.classList.remove('hidden')
