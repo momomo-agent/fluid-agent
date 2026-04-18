@@ -815,7 +815,7 @@ const WindowManager = (() => {
         ${ds.pending.length ? `<div class="tm-queue-section">Queued</div>${ds.pending.map(p => `<div class="tm-queue-item pending"><span>${p.priority === 0 ? '⚡' : p.priority === 2 ? '💤' : '○'}</span><span>${p.task.slice(0,50)}</span></div>`).join('')}` : ''}
         ${!ds.running.length && !ds.pending.length ? '<div class="tm-empty">Queue is empty</div>' : ''}
       </div>` : `
-      <div class="tm-list">${taskHistory.map(t => `
+      <div class="tm-content"><div class="tm-list">${taskHistory.map(t => `
         <div class="tm-item ${t.status} ${t.id === selected?.id ? 'active' : ''}" data-id="${t.id}">
           <span class="tm-status-dot"></span>
           <span class="tm-goal">${t.goal.slice(0, 40)}${t.goal.length > 40 ? '…' : ''}</span>
@@ -830,7 +830,7 @@ const WindowManager = (() => {
           </div>`).join('')}
         </div>
         ${selected.log.length ? `<div class="tm-log">${selected.log.slice(-8).map(l => `<div class="tm-log-line">${l}</div>`).join('')}</div>` : ''}
-      ` : '<div class="tm-empty">Select a task</div>'}</div>`}
+      ` : '<div class="tm-empty">Select a task</div>'}</div></div>`}
     </div>`
 
     body.querySelectorAll('.tm-item').forEach(el => {
