@@ -139,7 +139,12 @@ const Agent = (() => {
   }
 
   function configure(provider, apiKey, model, baseUrl, storeInstance) {
-    const opts = { provider, apiKey, proxyUrl: 'https://proxy.link2web.site' }
+    const opts = { provider, apiKey }
+    // Only use proxy.link2web.site when hitting first-party APIs (anthropic/openai) directly
+    // Third-party proxies (bltcy, sssaicode, etc.) are already accessible
+    if (!baseUrl || baseUrl.includes('anthropic.com') || baseUrl.includes('openai.com')) {
+      opts.proxyUrl = 'https://proxy.link2web.site'
+    }
     if (storeInstance) opts.store = { instance: storeInstance }
     else opts.store = { name: 'fluid-agent' }
     opts.model = model || (provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o')
@@ -541,6 +546,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
 
   // --- Task scheduling via Scheduler ---
   function enqueueTask(taskDescription, steps, priority = 1) {
+    console.log(`[enqueueTask] "${taskDescription.slice(0, 60)}" steps=${(steps||[]).length} priority=${priority}`)
     Scheduler.enqueue(taskDescription, steps, priority, [])
     if (!Scheduler.isIdle()) {
       const label = priority === 0 ? '⚡' : priority === 2 ? '💤' : '📥'
@@ -550,9 +556,11 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
 
   // Scheduler calls this when a slot opens
   async function startWorker(taskDescription, plannedSteps, abort) {
+    console.log(`[startWorker] called: "${taskDescription.slice(0, 60)}"`)  // DEBUG
     const workerId = Dispatcher.nextWorkerId()
     Dispatcher.registerWorker(workerId, taskDescription, plannedSteps)
 
+    try {
     // Use Task Manager instead of Plan window
     const task = WindowManager.addTask(taskDescription, plannedSteps || [])
     const steps = task.steps
@@ -914,6 +922,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
     let turnCount = 0
     const MAX_TURNS = 50
     let workerDone = false
+    console.log(`[Worker #${workerId}] Starting turn loop for: "${taskDescription.slice(0, 60)}"`)
 
     try {
       while (turnCount < MAX_TURNS && !workerDone) {
@@ -1012,6 +1021,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
       } else {
         task.status = 'error'
         task.log.push(`Error: ${err.message}`)
+        console.error('[Worker] Error:', err.message, err.stack)
         setWorkerStatus('❌ Error')
         showActivity(`Error: ${err.message}`)
         addBubble('system', `Worker error: ${err.message}`)
@@ -1021,6 +1031,13 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
     } finally {
       Dispatcher.updateWorker(workerId, { status: task.status })
       Dispatcher.removeWorker(workerId)
+    }
+    } catch (outerErr) {
+      // Catch errors in tool handler setup, fast lane, etc.
+      console.error('[Worker] Outer error:', outerErr.message, outerErr.stack)
+      Dispatcher.updateWorker(workerId, { status: 'error' })
+      Dispatcher.removeWorker(workerId)
+      throw outerErr  // Re-throw so Scheduler marks it as error
     }
   }
 

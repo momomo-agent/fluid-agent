@@ -247,7 +247,10 @@ Rules:
   return {
     init, registerWorker, updateWorker, removeWorker, nextWorkerId,
     pushIntent, drainIntents,
-    getStateSummary, formatForTalker,
+    getStateSummary, getState: () => {
+      const s = getStateSummary()
+      return { running: s.workers.filter(w => w.status === 'running'), pending: s.workers.filter(w => w.status === 'suspended') }
+    }, formatForTalker,
     decide, beforeTurn, afterTurn, handleIntent,
   }
 })()
