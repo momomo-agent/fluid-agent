@@ -349,7 +349,8 @@ const Agent = (() => {
       messages.push({ role: 'assistant', content: fullReply })
       saveChat()
 
-      const action = parseAction(fullReply)
+      const actions = parseAction(fullReply)
+      const action = actions?.[0]
       if (action?.action === 'execute' || action?.action === 'redirect') {
         renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
         // Route through Dispatcher for scheduling decision
@@ -381,6 +382,13 @@ const Agent = (() => {
         Scheduler.abort(null)
         setWorkerStatus('')
         showActivity('Tasks cleared')
+        // Process follow-up actions (e.g., abort then execute)
+        for (let i = 1; i < (actions || []).length; i++) {
+          const followUp = actions[i]
+          if (followUp?.action === 'execute') {
+            enqueueTask(followUp.task || userMessage, followUp.steps, followUp.priority ?? 1)
+          }
+        }
       } else if (action?.action === 'remember') {
         renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
         // Write to agent memory in VFS
@@ -539,9 +547,13 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
   }
 
   function parseAction(text) {
-    const m = text.match(/```json\s*(\{[\s\S]*?\})\s*```/)
-    if (!m) return null
-    try { return JSON.parse(m[1]) } catch { return null }
+    const blocks = []
+    const re = /```json\s*(\{[\s\S]*?\})\s*```/g
+    let m
+    while ((m = re.exec(text)) !== null) {
+      try { blocks.push(JSON.parse(m[1])) } catch {}
+    }
+    return blocks.length > 0 ? blocks : null
   }
 
   // --- Task scheduling via Scheduler ---
@@ -578,6 +590,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
           case 'write': VFS.mkdir(path.split('/').slice(0, -1).join('/')); VFS.writeFile(path, content); showActivity(`Created ${path.split('/').pop()}`); return { success: true }
           case 'read': { const c = VFS.readFile(path); return c !== null ? { content: c } : { error: `Not found: ${path}` } }
           case 'list': { const items = VFS.ls(path); return items ? { items } : { error: `Not found: ${path}` } }
+          case 'mkdir': VFS.mkdir(path); showActivity(`Created dir ${path}`); return { success: true }
           default: return { error: `Unknown fs action: ${action}` }
         }
       },
@@ -754,7 +767,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     }
 
     const toolDefs = {
-      fs: { desc: 'File system operations: write, read, or list files/directories', schema: { type: 'object', properties: { action: { type: 'string', enum: ['write', 'read', 'list'], description: 'write=create/overwrite file, read=read file, list=list directory' }, path: { type: 'string' }, content: { type: 'string', description: 'File content (for write)' } }, required: ['action', 'path'] } },
+      fs: { desc: 'File system operations: write, read, list, or mkdir files/directories', schema: { type: 'object', properties: { action: { type: 'string', enum: ['write', 'read', 'list', 'mkdir'], description: 'write=create/overwrite file, read=read file, list=list directory, mkdir=create directory' }, path: { type: 'string' }, content: { type: 'string', description: 'File content (for write)' } }, required: ['action', 'path'] } },
       run_command: { desc: 'Run a shell command and return output', schema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
       open: { desc: 'Open a built-in app: finder, editor, terminal, image, browser, map, music', schema: { type: 'object', properties: { target: { type: 'string', enum: ['finder', 'editor', 'terminal', 'image', 'browser', 'map', 'music'] }, path: { type: 'string', description: 'For finder/editor' }, url: { type: 'string', description: 'For browser/image' }, src: { type: 'string', description: 'For image' }, title: { type: 'string' }, lat: { type: 'number' }, lng: { type: 'number' }, zoom: { type: 'number' } }, required: ['target'] } },
       window: { desc: 'Window management: close, move, resize, minimize, maximize, restore, focus, list, tile', schema: { type: 'object', properties: { action: { type: 'string', enum: ['close', 'move', 'resize', 'minimize', 'maximize', 'restore', 'focus', 'list', 'tile'] }, title: { type: 'string', description: 'Window title (for most actions)' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, layout: { type: 'string', enum: ['grid', 'horizontal', 'vertical'], description: 'For tile action' } }, required: ['action'] } },
