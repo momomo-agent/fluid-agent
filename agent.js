@@ -419,7 +419,7 @@ const Agent = (() => {
 
     // Speak the reply if voice is enabled
     const spokenText = bubble.textContent
-    if (spokenText && Voice?.isEnabled()) Voice.speak(spokenText)
+    if (spokenText && Voice?.isEnabled() && !Voice.isListening()) Voice.speak(spokenText)
 
     // Auto-memory: after every conversation, check if something is worth remembering
     if (ai && fullReply && messages.length > 2) {
@@ -1103,7 +1103,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
     // Also show in activity stream
     showActivity(`💡 ${text.slice(0, 50)}`)
     // Voice if enabled
-    if (Voice?.isEnabled()) Voice.speak(text)
+    if (Voice?.isEnabled() && !Voice?.isListening()) Voice.speak(text)
   }
 
   function startProactiveLoop() {
@@ -1221,7 +1221,7 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
       saveChat()
 
       // Speak if voice enabled
-      if (Voice?.isEnabled()) Voice.speak(fullReply)
+      if (Voice?.isEnabled() && !Voice.isListening()) Voice.speak(fullReply)
 
       showActivity(`✅ Reported: ${taskDesc.slice(0, 40)}`)
     } catch (e) {
