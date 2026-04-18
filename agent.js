@@ -714,7 +714,20 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       },
       app: ({ action, name, html, css, js, icon, width, height, description }) => {
         switch (action) {
-          case 'create': case 'update': WindowManager.openApp(name, html, css, js, { icon, width, height, description }); showActivity(`💻 ${action === 'create' ? 'Created' : 'Updated'} app: ${name}`); return { success: true, message: `App "${name}" ${action === 'create' ? 'created and opened' : 'updated'}. It's now installed in the dock.` }
+          case 'create': case 'update': {
+            // File-driven: if no html provided, load from /home/user/apps/<name>/
+            let appHtml = html, appCss = css, appJs = js
+            if (!appHtml) {
+              const appDir = `/home/user/apps/${name}`
+              if (VFS.isFile(`${appDir}/index.html`)) appHtml = VFS.readFile(`${appDir}/index.html`)
+              if (VFS.isFile(`${appDir}/style.css`)) appCss = VFS.readFile(`${appDir}/style.css`)
+              if (VFS.isFile(`${appDir}/script.js`)) appJs = VFS.readFile(`${appDir}/script.js`)
+              if (!appHtml) return { error: `No html provided and no index.html found at ${appDir}/. Write files first with fs tool, then call app create.` }
+            }
+            WindowManager.openApp(name, appHtml, appCss || '', appJs || '', { icon, width, height, description })
+            showActivity(`💻 ${action === 'create' ? 'Created' : 'Updated'} app: ${name}`)
+            return { success: true, message: `App "${name}" ${action === 'create' ? 'created and opened' : 'updated'}. It's now installed in the dock.` }
+          }
           case 'uninstall': { const ok = WindowManager.uninstallApp?.(name); if (ok) { showActivity(`🗑️ Uninstalled: ${name}`); return { success: true } } return { error: `App "${name}" not found` } }
           case 'list': return { apps: WindowManager.getInstalledApps() }
           default: return { error: `Unknown app action: ${action}` }
@@ -790,7 +803,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       browser: { desc: 'Browser control: open, navigate to URL, go back', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'navigate', 'back'] }, url: { type: 'string' } }, required: ['action'] } },
       map: { desc: 'Map operations: open, add marker, clear markers, show route, clear route', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'marker', 'clear_markers', 'route', 'clear_route'] }, lat: { type: 'number' }, lng: { type: 'number' }, zoom: { type: 'number' }, label: { type: 'string' }, color: { type: 'string', enum: ['red', 'blue', 'green', 'orange', 'purple', 'pink', 'yellow'] }, from_lat: { type: 'number' }, from_lng: { type: 'number' }, to_lat: { type: 'number' }, to_lng: { type: 'number' } }, required: ['action'] } },
       video: { desc: 'Video player: play URL, pause, fullscreen', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'fullscreen'] }, url: { type: 'string', description: 'Video URL (for play)' }, title: { type: 'string' } }, required: ['action'] } },
-      app: { desc: 'Manage generative apps: create with HTML/CSS/JS, update, uninstall, list. Apps run in sandboxed windows and get installed in the dock. For create/update you MUST include: name, html, width, height. Size guide: calculator~320x420, text tool~500x400, dashboard~700x500, game~600x500.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'uninstall', 'list'] }, name: { type: 'string' }, html: { type: 'string' }, css: { type: 'string' }, js: { type: 'string' }, icon: { type: 'string' }, width: { type: 'number', description: 'Window width in px. Required for create.' }, height: { type: 'number', description: 'Window height in px. Required for create.' }, description: { type: 'string' } }, required: ['action'] } },
+      app: { desc: 'Manage generative apps. PREFERRED workflow: 1) Write files to /home/user/apps/<name>/ using fs tool (index.html, style.css, script.js), 2) Call app create with just name+width+height. This avoids token limits. You can also pass html/css/js inline for tiny apps. Size guide: calculator~320x420, text tool~500x400, dashboard~700x500, game~600x500.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'uninstall', 'list'] }, name: { type: 'string' }, html: { type: 'string', description: 'Optional if files exist at /home/user/apps/<name>/' }, css: { type: 'string' }, js: { type: 'string' }, icon: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, description: { type: 'string' } }, required: ['action'] } },
       skill: { desc: 'Manage skills (self-evolving tools): create, list, read, delete. Skills persist across sessions.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'list', 'read', 'delete'] }, name: { type: 'string' }, description: { type: 'string' }, icon: { type: 'string' }, schema: { type: 'object' }, handler: { type: 'string', description: 'JS function body. Receives (params, VFS, Shell, WindowManager).' } }, required: ['action'] } },
       update_progress: { desc: 'Mark a step as done by index (0-based)', schema: { type: 'object', properties: { step_index: { type: 'number' } }, required: ['step_index'] } },
       done: { desc: 'Signal task completion with summary', schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
@@ -939,6 +952,16 @@ To play music: search_tools({names:["search_music","music"]}) → search_music({
 Once loaded, tools stay available for the rest of this task.
 
 You ARE the OS. Don't just open apps - use them. Create new apps when the user needs custom UI.
+
+## Creating Apps (IMPORTANT)
+For anything beyond a trivial app, use the file-driven workflow:
+1. Write files to /home/user/apps/<app-name>/ using fs tool:
+   - fs({action:"write", path:"/home/user/apps/my-app/index.html", content:"..."})
+   - fs({action:"write", path:"/home/user/apps/my-app/style.css", content:"..."})
+   - fs({action:"write", path:"/home/user/apps/my-app/script.js", content:"..."})
+2. Then: app({action:"create", name:"my-app", icon:"🎮", width:600, height:500})
+   It auto-loads from the directory. This avoids output token limits.
+Only use inline html param for tiny apps (< 50 lines).
 
 ## Music Workflow
 To play music: search_music({query}) → get results with URLs → music({action: "add_and_play", title, artist, url: playUrl or previewUrl, artwork}).
