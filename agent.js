@@ -960,15 +960,31 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
 
         // --- LLM step ---
         turnCount++
-        const turn = await ai.step(workerMessages, {
-          tools,
-          system: workerSystem,
-          stream: true,
-          signal: abort.signal,
-          emit: (type, data) => {
-            if (type === 'token' && data.text) showActivity(`✍️ ${data.text.slice(-30)}`)
-          },
-        })
+        let turn, retries = 0
+        while (retries < 3) {
+          try {
+            turn = await ai.step(workerMessages, {
+              tools,
+              system: workerSystem,
+              stream: true,
+              signal: abort.signal,
+              emit: (type, data) => {
+                if (type === 'token' && data.text) showActivity(`✍️ ${data.text.slice(-30)}`)
+              },
+            })
+            break  // success
+          } catch (stepErr) {
+            if (abort.signal.aborted) throw stepErr
+            retries++
+            if (retries >= 3) throw stepErr
+            const isRetryable = stepErr.message?.includes('network') || stepErr.message?.includes('fetch') || stepErr.message?.includes('ERR_') || [429, 500, 502, 503].includes(stepErr.status)
+            if (!isRetryable) throw stepErr
+            const delay = retries * 2000
+            console.warn(`[Worker] Retry ${retries}/3 after: ${stepErr.message} (waiting ${delay}ms)`)
+            showActivity(`⚠️ Retry ${retries}/3...`)
+            await new Promise(r => setTimeout(r, delay))
+          }
+        }
 
         workerMessages = turn.messages
 
@@ -1040,6 +1056,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         setTimeout(() => setWorkerStatus(''), 2000)
       } else {
         task.status = 'error'
+        blackboard.currentTask.status = 'error'
         task.log.push(`Error: ${err.message}`)
         console.error('[Worker] Error:', err.message, err.stack)
         setWorkerStatus('❌ Error')
