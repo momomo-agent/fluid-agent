@@ -113,6 +113,7 @@
           case 'video': WindowManager.openVideo(); break
           case 'settings': WindowManager.openSettings(); break
           case 'spotlight': openSpotlight(); break
+          case 'launchpad': WindowManager.openLaunchpad(); break
         }
       })
     })

@@ -286,6 +286,7 @@ const WindowManager = (() => {
       case 'browser': renderBrowser(w, body); break
       case 'map': renderMap(w, body); break
       case 'app': renderApp(w, body); break
+      case 'launchpad': renderLaunchpad(w, body); break
     }
   }
 
@@ -911,6 +912,38 @@ const WindowManager = (() => {
 
   // --- Settings Window ---
   let settingsId = null
+  let launchpadId = null
+  function openLaunchpad() {
+    if (launchpadId && windows.has(launchpadId)) { focus(launchpadId); return launchpadId }
+    launchpadId = create({ type: 'launchpad', title: 'Launchpad', width: 520, height: 420 })
+    return launchpadId
+  }
+
+  function renderLaunchpad(w, body) {
+    const builtIn = [
+      { name: 'Finder', icon: '📁', action: () => openFinder('/home/user') },
+      { name: 'Terminal', icon: '⬛', action: () => openTerminal() },
+      { name: 'Browser', icon: '🌐', action: () => openBrowser() },
+      { name: 'Music', icon: '🎵', action: () => openMusic() },
+      { name: 'Video', icon: '🎬', action: () => openVideo() },
+      { name: 'Map', icon: '🗺️', action: () => openMap() },
+      { name: 'Settings', icon: '⚙️', action: () => openSettings() },
+    ]
+    const custom = Array.from(installedApps.entries()).map(([name, app]) => ({
+      name, icon: app.icon || '💻', action: () => openApp(name), custom: true
+    }))
+    const all = [...builtIn, ...custom]
+    body.innerHTML = `<div class="lp-grid">${all.map((a, i) => `
+      <div class="lp-item" data-idx="${i}">
+        <div class="lp-icon">${a.icon}</div>
+        <div class="lp-name">${a.name}</div>
+      </div>`).join('')}
+    </div>`
+    body.querySelectorAll('.lp-item').forEach(el => {
+      el.addEventListener('click', () => { all[+el.dataset.idx].action(); })
+    })
+  }
+
   function openSettings() {
     if (settingsId && windows.has(settingsId)) { focus(settingsId); return settingsId }
     settingsId = create({ type: 'settings', title: 'Settings', width: 600, height: 460 })
@@ -1997,5 +2030,5 @@ ${css}
     return { index: idx }
   }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, moveWindow, resizeWindow, minimizeByTitle, maximizeByTitle, unminimizeByTitle, tileWindows, musicAddTrack, getTaskHistory() { return taskHistory }, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openLaunchpad, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, moveWindow, resizeWindow, minimizeByTitle, maximizeByTitle, unminimizeByTitle, tileWindows, musicAddTrack, getTaskHistory() { return taskHistory }, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()
