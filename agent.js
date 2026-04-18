@@ -932,6 +932,10 @@ Once loaded, tools stay available for the rest of this task.
 
 You ARE the OS. Don't just open apps - use them. Create new apps when the user needs custom UI.
 
+## Music Workflow
+To play music: search_music({query}) → get results with URLs → music({action: "add_and_play", title, artist, url: playUrl or previewUrl, artwork}).
+NetEase results have full MP3 playUrl. iTunes results have 30s previewUrl.
+
 IMPORTANT: After completing each planned step, call update_progress with the step_index.
 When finished, call the done tool with a summary. Set summary to "silent" if the action itself IS the result (e.g. playing music, changing wallpaper, opening an app). Only write a detailed summary when there are findings or information the user needs to read.`
 

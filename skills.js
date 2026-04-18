@@ -198,6 +198,37 @@ const ExternalSkills = (() => {
     } catch (e) { return { error: `NetEase Music search failed: ${e.message}` } }
   }
 
+  // --- iTunes Music Search ---
+  async function searchITunesMusic(args) {
+    const query = args.query?.trim()
+    if (!query) return { error: 'Search query required' }
+    const limit = Math.min(args.limit || 5, 25)
+    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=${limit}`
+    try {
+      let data
+      try { const res = await fetch(url); if (!res.ok) throw new Error(`iTunes ${res.status}`); data = await res.json() }
+      catch (e) {
+        const proxyRes = await fetch('https://proxy.link2web.site', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, method: 'GET', mode: 'raw' }) })
+        const proxyData = await proxyRes.json()
+        if (!proxyData.success) throw new Error(proxyData.error || 'Proxy failed')
+        data = typeof proxyData.body === 'string' ? JSON.parse(proxyData.body) : proxyData.body
+      }
+      return { results: (data.results || []).map(t => ({ track: t.trackName, artist: t.artistName, album: t.collectionName, artwork: t.artworkUrl100?.replace('100x100', '600x600'), previewUrl: t.previewUrl, genre: t.primaryGenreName, releaseDate: t.releaseDate?.slice(0, 10) })) }
+    } catch (e) { return { error: `iTunes search failed: ${e.message}` } }
+  }
+
+  // --- Location ---
+  function getLocation() {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) { resolve({ error: 'Geolocation not supported' }); return }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) }),
+        (err) => resolve({ error: { 1: 'User denied location access', 2: 'Position unavailable', 3: 'Request timed out' }[err.code] || err.message }),
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+      )
+    })
+  }
+
   // --- Image Generation ---
   // --- Public API: returns { defs, handlers } ---
   function register(getConfig) {
@@ -248,9 +279,23 @@ const ExternalSkills = (() => {
     defs.search_podcast = { desc: 'Search podcasts and get episodes with playable audio URLs. Works for 小宇宙, Apple Podcasts, etc.', schema: { type: 'object', properties: { query: { type: 'string', description: 'Podcast name, topic, or host' }, limit: { type: 'number' }, episodes: { type: 'number' } }, required: ['query'] } }
     handlers.search_podcast = (p) => searchPodcast(p)
 
-    // NetEase Music
-    defs.search_netease_music = { desc: 'Search songs on NetEase Cloud Music (网易云音乐). Returns playable MP3 URLs.', schema: { type: 'object', properties: { query: { type: 'string', description: 'Song, artist, or album name' }, limit: { type: 'number' } }, required: ['query'] } }
-    handlers.search_netease_music = (p) => searchNeteaseMusic(p)
+    // Music Search (unified: NetEase for Chinese songs with playable URLs, iTunes for international with preview URLs)
+    defs.search_music = { desc: 'Search for songs. Returns track name, artist, album, artwork, and playable/preview URLs. For Chinese songs uses NetEase (full MP3), for international uses iTunes (30s preview). After getting results, use the music tool with action "add_and_play" to play in the Music app.', schema: { type: 'object', properties: { query: { type: 'string', description: 'Song, artist, or album name' }, source: { type: 'string', enum: ['auto', 'netease', 'itunes'], description: 'Music source. auto = try NetEase first for Chinese queries, iTunes otherwise' }, limit: { type: 'number' } }, required: ['query'] } }
+    handlers.search_music = async (p) => {
+      const source = p.source || 'auto'
+      const isChinese = /[\u4e00-\u9fff]/.test(p.query)
+      if (source === 'netease' || (source === 'auto' && isChinese)) {
+        const result = await searchNeteaseMusic(p)
+        if (result.results?.length) return { ...result, source: 'netease' }
+        if (source === 'netease') return result
+      }
+      const result = await searchITunesMusic(p)
+      return { ...result, source: 'itunes' }
+    }
+
+    // Location
+    defs.get_location = { desc: 'Get user\'s current location (lat/lng) via browser GPS. Use before get_weather to auto-detect city.', schema: { type: 'object', properties: {} } }
+    handlers.get_location = () => getLocation()
 
     return { defs, handlers }
   }
