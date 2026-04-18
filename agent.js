@@ -803,7 +803,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     if (steps.length > 0) { steps[0].status = 'running'; WindowManager.updateTask(task) }
 
     // --- Tool Search: deferred tool loading ---
-    const coreToolNames = new Set(['fs', 'run_command', 'open', 'window', 'set_wallpaper', 'done', 'update_progress', 'search_tools'])
+    const coreToolNames = new Set(['fs', 'run_command', 'open', 'window', 'set_wallpaper', 'music', 'browser', 'map', 'video', 'done', 'update_progress', 'search_tools'])
     const loadedTools = new Set([...coreToolNames])
 
     const toolCatalog = Object.fromEntries(
@@ -922,7 +922,19 @@ Planned steps:
 ${steps.map((s, i) => `${i}. ${s.text}`).join('\n')}
 
 ## Tool System
-You have core tools always available: fs, run_command, open, window, set_wallpaper, update_progress, done.
+You have core tools always available:
+- fs: read/write/list/mkdir files
+- run_command: execute shell commands
+- open: launch built-in apps (finder, editor, terminal, browser, map, music, image)
+- window: manage windows (close, move, resize, minimize, maximize, tile)
+- music: control Music app (play, pause, next, prev, add, add_and_play with URL)
+- browser: control Browser (open, navigate, back)
+- map: control Map (open, add markers, show routes)
+- video: control Video player (play URL, pause, fullscreen)
+- set_wallpaper: change desktop wallpaper
+- update_progress / done: task lifecycle
+
+PREFER native apps over browser. Use music tool for music, map tool for locations, video tool for videos. Only use browser when you need to browse the web.
 
 For additional capabilities, use search_tools to discover and load tools:
 ${extendedToolList}
