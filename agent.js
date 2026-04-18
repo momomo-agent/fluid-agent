@@ -166,7 +166,7 @@ const Agent = (() => {
     setTimeout(() => { if (item.parentNode) item.remove() }, 8000)
   }
 
-  function setWorkerStatus(text) { document.getElementById('worker-status').textContent = text }
+  function setWorkerStatus(text) { const el = document.getElementById('worker-status'); if (el) el.textContent = text }
 
   function renderBubbleContent(bubble, text) {
     // Detect media patterns and render inline
@@ -1111,9 +1111,9 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
     proactiveTimer = setInterval(async () => {
       if (!ai || !proactiveEnabled) return
       // Don't interrupt if user just spoke (wait 30s)
-      if (Date.now() - lastUserMessage < 30000) return
+      if (Date.now() - lastUserMessage < 120000) return
       // Don't be too chatty (min 60s between proactive messages)
-      if (Date.now() - lastProactive < 60000) return
+      if (Date.now() - lastProactive < 300000) return
       // Don't interrupt active work
       if (!Scheduler.isIdle()) {
         // But DO notify on task completion
@@ -1146,7 +1146,7 @@ Respond with JSON:
 or
 {"speak": false}
 
-Be selective. Don't speak just to speak. Quality > frequency.`,
+ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly important happened (task completed with results to share, critical error). NEVER comment on what windows are open, what the user is browsing, or offer unsolicited help. Silence is the default.`,
             stream: false,
           }
         )
@@ -1167,7 +1167,7 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
       } catch (e) {
         console.warn('[Proactive]', e)
       }
-    }, 30000) // Check every 30s
+    }, 120000) // Check every 2min
   }
 
   function stopProactiveLoop() {
