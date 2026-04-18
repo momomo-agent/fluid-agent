@@ -506,6 +506,7 @@ You are an operating system with these capabilities (Workers use these tools to 
 - **Knowledge**: get_wikipedia, get_stock, search_movie/search_tv (TMDB), search_podcast
 - **Math**: calculate
 - **Apps**: create custom apps on the fly (HTML/CSS/JS → sandboxed window)
+- **Wallpaper**: set_wallpaper — presets (aurora/sunset/ocean/forest/lavender/midnight/rose/sky), CSS gradients, or image URLs
 
 IMPORTANT: Use native tools, not the browser. Music → search_music + music tool. Weather → get_weather. Maps → map tool. Only use browser when the user explicitly wants to browse a website.
 
@@ -979,6 +980,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
               system: workerSystem,
               stream: true,
               signal: abort.signal,
+              maxTokens: 16384,
               emit: (type, data) => {
                 if (type === 'token' && data.text) showActivity(`✍️ ${data.text.slice(-30)}`)
               },
