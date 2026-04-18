@@ -1263,7 +1263,8 @@ const WindowManager = (() => {
     if (track.url) {
       // External URL track — use Audio element
       if (!s._audio) s._audio = new Audio()
-      s._audio.src = track.url
+      // Force HTTPS to avoid Mixed Content errors (NetEase CDN supports HTTPS)
+      s._audio.src = track.url.replace(/^http:\/\//, 'https://')
       s._audio.currentTime = s.elapsed
       s._audio.play().catch(() => {})
       s._audio.onended = () => {

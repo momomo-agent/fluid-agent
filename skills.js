@@ -192,7 +192,7 @@ const ExternalSkills = (() => {
       return {
         results: songs.map(s => {
           const dur = Math.round((s.dt || 0) / 1000), min = Math.floor(dur / 60), sec = dur % 60
-          return { track: s.name, artist: (s.ar || []).map(a => a.name).join(' / '), album: s.al?.name || '', artwork: s.al?.picUrl || null, url: `https://music.163.com/song/media/outer/url?id=${s.id}.mp3`, playUrl: `https://music.163.com/song/media/outer/url?id=${s.id}.mp3`, duration: `${min}:${sec.toString().padStart(2, '0')}`, ncmId: s.id }
+          return { track: s.name, artist: (s.ar || []).map(a => a.name).join(' / '), album: s.al?.name || '', artwork: (s.al?.picUrl || '').replace('http://', 'https://') || null, url: `https://music.163.com/song/media/outer/url?id=${s.id}.mp3`, playUrl: `https://music.163.com/song/media/outer/url?id=${s.id}.mp3`, duration: `${min}:${sec.toString().padStart(2, '0')}`, ncmId: s.id }
         })
       }
     } catch (e) { return { error: `NetEase Music search failed: ${e.message}` } }
