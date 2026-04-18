@@ -464,10 +464,12 @@ const Agent = (() => {
   }
 
   function cleanReply(text) {
-    // Remove complete JSON blocks
-    let cleaned = text.replace(/```json[\s\S]*?```/g, '')
-    // Also remove incomplete JSON block still being streamed (opened but not closed)
-    cleaned = cleaned.replace(/```json[\s\S]*$/g, '')
+    // Remove complete fenced JSON blocks (```json...```)
+    let cleaned = text.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/g, '')
+    // Remove incomplete fenced block still streaming (``` opened but not closed)
+    cleaned = cleaned.replace(/```(?:json)?\s*[\s\S]*$/g, '')
+    // Remove bare JSON action objects that leaked through
+    cleaned = cleaned.replace(/\{\s*"action"\s*:[\s\S]*$/g, '')
     return cleaned.trim()
   }
 
