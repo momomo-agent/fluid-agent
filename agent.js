@@ -144,7 +144,8 @@ const Agent = (() => {
     const settings = window._settingsCache || {}
     if (settings.useProxy) {
       opts.proxyUrl = 'https://proxy.link2web.site'
-    } else if (!baseUrl || baseUrl.includes('anthropic.com') || baseUrl.includes('openai.com')) {
+    } else if (!baseUrl || !baseUrl.includes('localhost')) {
+      // Browser can't call external APIs directly (CORS), always proxy
       opts.proxyUrl = 'https://proxy.link2web.site'
     }
     if (storeInstance) opts.store = { instance: storeInstance }
