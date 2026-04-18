@@ -693,6 +693,25 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         }
         return { success: true }
       },
+      browser_control: ({ action, ref, text, submit, selector, code, url, x, y }) => {
+        // Control the active browser iframe via postMessage bridge
+        return new Promise((resolve) => {
+          const iframes = document.querySelectorAll('.browser-content iframe')
+          const iframe = iframes[iframes.length - 1] // latest browser
+          if (!iframe || !iframe.contentWindow) { resolve({ error: 'No active browser iframe' }); return }
+          const id = Date.now() + Math.random()
+          const timeout = setTimeout(() => { window.removeEventListener('message', handler); resolve({ error: 'Bridge timeout (5s)' }) }, 5000)
+          function handler(event) {
+            if (event.data?.__bridgeResponse && event.data.__id === id) {
+              clearTimeout(timeout)
+              window.removeEventListener('message', handler)
+              resolve(event.data)
+            }
+          }
+          window.addEventListener('message', handler)
+          iframe.contentWindow.postMessage({ __bridge: true, __id: id, action, ref, text, submit, selector, code, url, x, y }, '*')
+        })
+      },
       map: ({ action, lat, lng, label, color, zoom, from_lat, from_lng, to_lat, to_lng }) => {
         switch (action) {
           case 'open': EventBus.emit('window.open', { type: 'map', lat, lng, zoom }); showActivity(`🗺️ Map`); break
@@ -802,6 +821,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       set_wallpaper: { desc: 'Change desktop wallpaper with preset, CSS gradient, or image URL', schema: { type: 'object', properties: { preset: { type: 'string', enum: ['aurora', 'sunset', 'ocean', 'forest', 'lavender', 'midnight', 'rose', 'sky'] }, css: { type: 'string' }, url: { type: 'string' } } } },
       music: { desc: 'Control music player. Actions: play, pause, next, prev, add (add track to playlist), add_and_play (add and immediately play). For add/add_and_play: provide title, artist, and optionally url (external audio URL like MP3) and artwork (album cover image URL). If no url, a synth track is generated using style.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'add', 'add_and_play'] }, track: { type: 'number', description: '0-based track index for play' }, title: { type: 'string', description: 'Track title for add' }, artist: { type: 'string', description: 'Artist name for add' }, style: { type: 'string', enum: ['dreamy', 'bright', 'gentle', 'moody', 'playful'], description: 'Synth style for generated track (ignored if url provided)' }, url: { type: 'string', description: 'External audio URL (MP3) for real music playback' }, artwork: { type: 'string', description: 'Album cover image URL' } }, required: ['action'] } },
       browser: { desc: 'Browser control: open, navigate to URL, go back', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'navigate', 'back'] }, url: { type: 'string' } }, required: ['action'] } },
+      browser_control: { desc: 'Control the active browser page (like Playwright). Actions: snapshot (list interactive elements with refs), click @ref, type @ref text, extract (get page text), eval (run JS), scroll, highlight @ref, navigate url, ping.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['snapshot', 'click', 'type', 'extract', 'eval', 'scroll', 'highlight', 'navigate', 'ping'] }, ref: { type: 'string', description: '@e1, @e2 etc from snapshot' }, text: { type: 'string' }, submit: { type: 'boolean' }, selector: { type: 'string' }, code: { type: 'string' }, url: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['action'] } },
       map: { desc: 'Map operations: open, add marker, clear markers, show route, clear route', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'marker', 'clear_markers', 'route', 'clear_route'] }, lat: { type: 'number' }, lng: { type: 'number' }, zoom: { type: 'number' }, label: { type: 'string' }, color: { type: 'string', enum: ['red', 'blue', 'green', 'orange', 'purple', 'pink', 'yellow'] }, from_lat: { type: 'number' }, from_lng: { type: 'number' }, to_lat: { type: 'number' }, to_lng: { type: 'number' } }, required: ['action'] } },
       video: { desc: 'Video player: play URL, pause, fullscreen', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'fullscreen'] }, url: { type: 'string', description: 'Video URL (for play)' }, title: { type: 'string' } }, required: ['action'] } },
       app: { desc: 'Manage generative apps. PREFERRED workflow: 1) Write files to /home/user/apps/<name>/ using fs tool (index.html, style.css, script.js), 2) Call app create with just name+width+height. This avoids token limits. You can also pass html/css/js inline for tiny apps. Size guide: calculator~320x420, text tool~500x400, dashboard~700x500, game~600x500.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'uninstall', 'list'] }, name: { type: 'string' }, html: { type: 'string', description: 'Optional if files exist at /home/user/apps/<name>/' }, css: { type: 'string' }, js: { type: 'string' }, icon: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, description: { type: 'string' } }, required: ['action'] } },
