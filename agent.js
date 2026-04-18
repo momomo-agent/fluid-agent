@@ -803,9 +803,8 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     if (steps.length > 0) { steps[0].status = 'running'; WindowManager.updateTask(task) }
 
     // --- Tool Search: deferred tool loading ---
-    const coreToolNames = new Set(['fs', 'run_command', 'open', 'window', 'set_wallpaper', 'music', 'browser', 'map', 'video', 'done', 'update_progress', 'search_tools'])
-    const loadedTools = new Set([...coreToolNames])
-
+    const alwaysAvailable = new Set(['fs', 'run_command', 'update_progress', 'done', 'search_tools'])
+    const loadedTools = new Set([...alwaysAvailable])
     const toolCatalog = Object.fromEntries(
       Object.entries(toolDefs).map(([name, { desc }]) => [name, desc])
     )
@@ -827,7 +826,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       return { results: matches, hint: 'Call search_tools with names:[...] to load specific tools' }
     }
     toolDefs.search_tools = {
-      desc: 'Search and load tools by keyword or exact names. Core tools (fs, run_command, open, window) are always available. Use this to discover and activate additional tools.',
+      desc: 'Load tools by name. All tools are listed in the system prompt — call this with the exact names you need. Tools stay loaded for the rest of this task.',
       schema: { type: 'object', properties: {
         query: { type: 'string', description: 'Keyword to search tool names/descriptions' },
         names: { type: 'array', items: { type: 'string' }, description: 'Exact tool names to load' }
@@ -835,7 +834,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     }
 
     const extendedToolList = Object.entries(toolCatalog)
-      .filter(([name]) => !coreToolNames.has(name))
+      .filter(([name]) => !alwaysAvailable.has(name))
       .map(([name, desc]) => `  - ${name}: ${desc}`)
       .join('\n')
 
@@ -906,8 +905,6 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     }
 
     // --- Turn Loop: ai.step() with Dispatcher checkpoints ---
-    const tools = getActiveTools()
-
     const os = getOsState()
     const workerSystem = `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
 
@@ -922,24 +919,13 @@ Planned steps:
 ${steps.map((s, i) => `${i}. ${s.text}`).join('\n')}
 
 ## Tool System
-You have core tools always available:
-- fs: read/write/list/mkdir files
-- run_command: execute shell commands
-- open: launch built-in apps (finder, editor, terminal, browser, map, music, image)
-- window: manage windows (close, move, resize, minimize, maximize, tile)
-- music: control Music app (play, pause, next, prev, add, add_and_play with URL)
-- browser: control Browser (open, navigate, back)
-- map: control Map (open, add markers, show routes)
-- video: control Video player (play URL, pause, fullscreen)
-- set_wallpaper: change desktop wallpaper
-- update_progress / done: task lifecycle
+Always available: fs, run_command, update_progress, done, search_tools.
 
-PREFER native apps over browser. Use music tool for music, map tool for locations, video tool for videos. Only use browser when you need to browse the web.
-
-For additional capabilities, use search_tools to discover and load tools:
+All other tools — call search_tools({names: [...]}) to activate:
 ${extendedToolList}
 
-Call search_tools({names: ["tool_name"]}) to load specific tools, or search_tools({query: "keyword"}) to search.
+PREFER native apps over browser. Use music for music, map for locations, video for videos.
+To play music: search_tools({names:["search_music","music"]}) → search_music({query}) → music({action:"add_and_play",...}).
 Once loaded, tools stay available for the rest of this task.
 
 You ARE the OS. Don't just open apps - use them. Create new apps when the user needs custom UI.
@@ -980,7 +966,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         while (retries < 3) {
           try {
             turn = await ai.step(workerMessages, {
-              tools,
+              tools: getActiveTools(),
               system: workerSystem,
               stream: true,
               signal: abort.signal,
