@@ -146,6 +146,7 @@ const Agent = (() => {
     if (baseUrl) opts.baseUrl = baseUrl
     const AgenticClass = typeof Agentic === 'function' ? Agentic : Agentic.Agentic
     ai = new AgenticClass(opts)
+    if (typeof Dispatcher !== 'undefined') Dispatcher.init(ai)
   }
 
   function showActivity(text) {
@@ -346,10 +347,29 @@ const Agent = (() => {
       const action = parseAction(fullReply)
       if (action?.action === 'execute' || action?.action === 'redirect') {
         renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
-        enqueueTask(action.task || userMessage, action.steps, action.priority ?? 1)
+        // Route through Dispatcher for scheduling decision
+        if (typeof Dispatcher !== 'undefined') {
+          const decision = await Dispatcher.handleIntent(action)
+          if (decision.action === 'new') {
+            enqueueTask(decision.task || action.task || userMessage, decision.steps || action.steps, decision.priority ?? action.priority ?? 1)
+          } else if (decision.action === 'steer' && decision.workerId) {
+            Dispatcher.pushIntent({ action: 'steer', instruction: decision.instruction })
+            showActivity(`↪ Steering #${decision.workerId}: ${(decision.instruction || '').slice(0, 40)}`)
+          } else if (decision.action === 'abort') {
+            Scheduler.abort(decision.workerId || null)
+            setWorkerStatus('')
+            showActivity('Tasks cleared')
+          }
+        } else {
+          enqueueTask(action.task || userMessage, action.steps, action.priority ?? 1)
+        }
       } else if (action?.action === 'steer') {
         renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
-        blackboard.directive = { type: 'steer', instruction: action.instruction }
+        if (typeof Dispatcher !== 'undefined') {
+          Dispatcher.pushIntent({ action: 'steer', instruction: action.instruction })
+        } else {
+          blackboard.directive = { type: 'steer', instruction: action.instruction }
+        }
         showActivity(`↪ Steering: ${action.instruction?.slice(0, 40)}`)
       } else if (action?.action === 'abort') {
         renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
@@ -474,9 +494,12 @@ Current OS state:
 - Installed skills: ${os.skills}
 `
     if (runningTasks.length > 0) {
-      sys += `\nCurrently executing: ${runningTasks[0].goal} (${runningTasks[0].status})`
+      sys += `\nCurrently executing: ${runningTasks[0].task} (${runningTasks[0].status})`
       if (queuedCount > 0) sys += `\nQueued tasks: ${queuedCount}`
     }
+    // Inject Dispatcher state so Talker knows what Workers are doing
+    const dispatchState = typeof Dispatcher !== 'undefined' ? Dispatcher.formatForTalker() : ''
+    if (dispatchState) sys += dispatchState
     sys += `\nCompleted recently: ${blackboard.completedSteps.map(s => s.text).join(', ') || 'none'}`
 
     sys += `\n\nWhen the user wants you to DO something (not just talk), use action blocks:
@@ -527,10 +550,13 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
 
   // Scheduler calls this when a slot opens
   async function startWorker(taskDescription, plannedSteps, abort) {
+    const workerId = Dispatcher.nextWorkerId()
+    Dispatcher.registerWorker(workerId, taskDescription, plannedSteps)
+
     // Use Task Manager instead of Plan window
     const task = WindowManager.addTask(taskDescription, plannedSteps || [])
     const steps = task.steps
-    blackboard.currentTask = { goal: taskDescription, steps, status: 'running' }
+    blackboard.currentTask = { goal: taskDescription, steps, status: 'running', workerId }
     blackboard.directive = null
     blackboard.completedSteps = []
     blackboard.workerLog = []
@@ -823,25 +849,49 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       return Object.entries(allToolDefs)
         .filter(([name]) => loadedTools.has(name))
         .map(([name, { desc, schema }]) => ({
-          name, description: desc, input_schema: schema, execute: makeExecutor(name)
+          name, description: desc, input_schema: schema
         }))
     }
 
+    // --- Fast Lane: single-tool tasks skip LLM ---
+    function tryFastLane(desc) {
+      const d = desc.toLowerCase()
+      if (/play\s+(music|song|track)|resume\s+music|pause\s+music|stop\s+music|next\s+(track|song)|prev(ious)?\s+(track|song)|shuffle/i.test(desc)) {
+        const action = /pause|stop/i.test(d) ? 'pause' : /next/i.test(d) ? 'next' : /prev/i.test(d) ? 'previous' : /shuffle/i.test(d) ? 'shuffle' : /resume/i.test(d) ? 'play' : 'play'
+        return allHandlers.music?.({ action })
+      }
+      const openMatch = desc.match(/open\s+(finder|editor|terminal|browser|music|map)/i)
+      if (openMatch) return allHandlers.open?.({ target: openMatch[1].toLowerCase() })
+      const wpMatch = desc.match(/(?:set|change)\s+wallpaper\s+(?:to\s+)?(aurora|sunset|ocean|forest|lavender|midnight|rose|sky)/i)
+      if (wpMatch) return allHandlers.set_wallpaper?.({ preset: wpMatch[1].toLowerCase() })
+      return null
+    }
+
+    const fastResult = tryFastLane(taskDescription)
+    if (fastResult) {
+      steps.forEach(s => { s.status = 'done' })
+      task.status = 'done'
+      blackboard.currentTask.status = 'done'
+      WindowManager.updateTask(task)
+      setWorkerStatus(Scheduler.isIdle() ? '\u2705 Done' : '\u23f3 ' + Scheduler.getState().pending.length + ' queued')
+      showActivity('\u26a1 Fast: ' + taskDescription.slice(0, 40))
+      Dispatcher.updateWorker(workerId, { status: 'done', turnCount: 1 })
+      Dispatcher.removeWorker(workerId)
+      return
+    }
+
+    // --- Turn Loop: ai.step() with Dispatcher checkpoints ---
     const tools = getActiveTools()
 
-    try {
-      const os = getOsState()
-      const steerNote = blackboard.directive?.type === 'steer' ? `\n\nIMPORTANT DIRECTION CHANGE: ${blackboard.directive.instruction}\nAdjust your execution plan accordingly.` : ''
-      if (steerNote) blackboard.directive = null
-      await ai.think(taskDescription, {
-        system: `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
+    const os = getOsState()
+    const workerSystem = `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
 
 Current OS state:
 - Desktop size: ${os.desktopSize}
 - Open windows: ${os.windows}
 - Working directory: ${os.cwd}
 - Desktop files: ${JSON.stringify(os.desktop)}
-- Installed apps: ${os.installedApps}${steerNote}
+- Installed apps: ${os.installedApps}
 
 Planned steps:
 ${steps.map((s, i) => `${i}. ${s.text}`).join('\n')}
@@ -854,20 +904,94 @@ ${extendedToolList}
 
 Call search_tools({names: ["tool_name"]}) to load specific tools, or search_tools({query: "keyword"}) to search.
 Once loaded, tools stay available for the rest of this task.
-  Create a skill when you discover a useful pattern worth saving permanently.
-  Each skill has: name, description, JSON schema, and a JS handler function.
 
 You ARE the OS. Don't just open apps - use them. Create new apps when the user needs custom UI.
 
-SELF-EVOLUTION: When you discover a useful pattern (e.g., a common file operation, a data transformation, a workflow), create a skill with create_skill. Skills persist and become permanent tools. Think of it as teaching yourself new abilities.
-
 IMPORTANT: After completing each planned step, call update_progress with the step_index.
-When finished, call the done tool with a summary. Set summary to "silent" if the action itself IS the result (e.g. playing music, changing wallpaper, opening an app — the user can see/hear it happened). Only write a detailed summary when there are findings, file contents, or information the user needs to read.`,
-        stream: false,
-        tools,
-      })
+When finished, call the done tool with a summary. Set summary to "silent" if the action itself IS the result (e.g. playing music, changing wallpaper, opening an app). Only write a detailed summary when there are findings or information the user needs to read.`
 
-      if (blackboard.currentTask?.status !== 'done') {
+    let workerMessages = [{ role: 'user', content: taskDescription }]
+    let turnCount = 0
+    const MAX_TURNS = 50
+    let workerDone = false
+
+    try {
+      while (turnCount < MAX_TURNS && !workerDone) {
+        if (abort.signal.aborted) throw new Error('aborted')
+
+        // --- Dispatcher checkpoint: before turn ---
+        const preDecision = await Dispatcher.beforeTurn(workerId)
+        if (preDecision.action === 'abort') throw new Error('aborted')
+        if (preDecision.action === 'suspend') {
+          Dispatcher.updateWorker(workerId, { status: 'suspended', suspendedAt: Date.now() })
+          return
+        }
+        if (preDecision.action === 'steer' && preDecision.instruction) {
+          workerMessages.push({ role: 'user', content: `[DIRECTION CHANGE] ${preDecision.instruction}` })
+          task.log.push(`↪ Steered: ${preDecision.instruction}`)
+          showActivity(`↪ Steering: ${preDecision.instruction.slice(0, 40)}`)
+        }
+
+        // --- LLM step ---
+        turnCount++
+        const turn = await ai.step(workerMessages, {
+          tools,
+          system: workerSystem,
+          stream: false,
+          signal: abort.signal,
+        })
+
+        workerMessages = turn.messages
+
+        // --- Execute tool calls ---
+        if (turn.toolCalls.length > 0) {
+          const results = []
+          for (const tc of turn.toolCalls) {
+            if (abort.signal.aborted) throw new Error('aborted')
+            blackboard.workerLog.push({ tool: tc.name, params: tc.input, time: Date.now() })
+            task.log.push(`${tc.name}: ${JSON.stringify(tc.input).slice(0, 60)}`)
+
+            const handler = allHandlers[tc.name]
+            const result = handler ? await handler(tc.input) : { error: `Unknown tool: ${tc.name}` }
+            results.push(result)
+            WindowManager.updateTask(task)
+
+            if (result?.done) {
+              task.status = 'done'
+              blackboard.currentTask.status = 'done'
+              setWorkerStatus(Scheduler.isIdle() ? '✅ Done' : `⏳ ${Scheduler.getState().pending.length} queued`)
+              steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
+              WindowManager.updateTask(task)
+              reportTaskResult(taskDescription, result.summary || '', task.log)
+              workerDone = true
+            }
+          }
+
+          const toolMsgs = ai.buildToolResults(turn.toolCalls, results)
+          workerMessages.push(...toolMsgs)
+        }
+
+        if (turn.done && !workerDone) workerDone = true
+
+        // --- Dispatcher checkpoint: after turn ---
+        Dispatcher.updateWorker(workerId, {
+          turnCount,
+          lastTool: turn.toolCalls[0]?.name || null,
+          lastResult: turn.text?.slice(0, 100) || null,
+        })
+
+        const postDecision = await Dispatcher.afterTurn(workerId, {
+          lastTool: turn.toolCalls[0]?.name || null,
+          summary: turn.text?.slice(0, 100),
+        })
+        if (postDecision?.action === 'abort') throw new Error('aborted')
+        if (postDecision?.action === 'steer' && postDecision.instruction) {
+          workerMessages.push({ role: 'user', content: `[DIRECTION CHANGE] ${postDecision.instruction}` })
+          task.log.push(`↪ Steered: ${postDecision.instruction}`)
+        }
+      }
+
+      if (!workerDone || blackboard.currentTask?.status !== 'done') {
         task.status = 'done'
         blackboard.currentTask.status = 'done'
         setWorkerStatus('✅ Done')
@@ -894,6 +1018,9 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         steps.forEach(s => { if (s.status !== 'done') s.status = 'error' })
         WindowManager.updateTask(task)
       }
+    } finally {
+      Dispatcher.updateWorker(workerId, { status: task.status })
+      Dispatcher.removeWorker(workerId)
     }
   }
 
