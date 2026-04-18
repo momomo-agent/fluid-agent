@@ -943,6 +943,10 @@ const WindowManager = (() => {
         <div class="settings-label">Base URL (optional)</div>
         <input class="settings-input" id="s-baseurl" type="text" placeholder="https://api.anthropic.com" value="${saved.baseUrl || ''}">
       </div>
+      <div class="settings-section">
+        <label class="settings-toggle"><input type="checkbox" id="s-proxy" ${saved.useProxy ? 'checked' : ''}> Use Proxy (proxy.link2web.site)</label>
+        <div class="settings-hint">Route API calls through proxy to bypass network restrictions</div>
+      </div>
       <div class="settings-divider"></div>
       <div class="settings-group-title">Web</div>
       <div class="settings-section">
@@ -1058,6 +1062,7 @@ const WindowManager = (() => {
         apiKey: body.querySelector('#s-apikey').value,
         model: body.querySelector('#s-model').value,
         baseUrl: body.querySelector('#s-baseurl').value,
+        useProxy: body.querySelector('#s-proxy').checked,
         voice: body.querySelector('#s-voice').checked,
         tavilyKey: body.querySelector('#s-tavily').value,
         tmdbKey: body.querySelector('#s-tmdb').value,

@@ -140,9 +140,11 @@ const Agent = (() => {
 
   function configure(provider, apiKey, model, baseUrl, storeInstance) {
     const opts = { provider, apiKey }
-    // Only use proxy.link2web.site when hitting first-party APIs (anthropic/openai) directly
-    // Third-party proxies (bltcy, sssaicode, etc.) are already accessible
-    if (!baseUrl || baseUrl.includes('anthropic.com') || baseUrl.includes('openai.com')) {
+    // Use proxy if enabled in settings, or auto-detect for first-party APIs
+    const settings = window._settingsCache || {}
+    if (settings.useProxy) {
+      opts.proxyUrl = 'https://proxy.link2web.site'
+    } else if (!baseUrl || baseUrl.includes('anthropic.com') || baseUrl.includes('openai.com')) {
       opts.proxyUrl = 'https://proxy.link2web.site'
     }
     if (storeInstance) opts.store = { instance: storeInstance }
