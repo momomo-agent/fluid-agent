@@ -1220,11 +1220,32 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
     if (proactiveTimer) { clearInterval(proactiveTimer); proactiveTimer = null }
   }
 
-  // Track user activity
+  // Track user activity + serial message queue
   const origChat = chat
+  const _chatQueue = []
+  let _chatProcessing = false
+
+  async function _processChatQueue() {
+    if (_chatProcessing) return
+    _chatProcessing = true
+    while (_chatQueue.length > 0) {
+      const { msg, resolve, reject } = _chatQueue.shift()
+      try {
+        const result = await origChat(msg)
+        resolve(result)
+      } catch (e) {
+        reject(e)
+      }
+    }
+    _chatProcessing = false
+  }
+
   async function chatWithTracking(msg) {
     lastUserMessage = Date.now()
-    return origChat(msg)
+    return new Promise((resolve, reject) => {
+      _chatQueue.push({ msg, resolve, reject })
+      _processChatQueue()
+    })
   }
 
   // Worker completion notification
@@ -1282,7 +1303,10 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
   }
 
   // Wire Scheduler to startWorker
-  Scheduler._onStart = (entry, slotIndex, abort) => startWorker(entry.task, entry.steps, abort)
+  Scheduler._onStart = (entry, slotIndex, abort) => startWorker(
+    typeof entry.task === 'string' ? entry.task : entry.task.description || JSON.stringify(entry.task),
+    entry.steps, abort
+  )
 
   return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getScheduler: () => Scheduler, renderBubbleContent, _messages: messages, getSkills: () => Array.from(customSkills.entries()).map(([name, s]) => ({ name, icon: s.icon, description: s.description })), deleteSkill: (name) => { customSkills.delete(name); VFS.rm(`/system/skills/${name}`, true) }, getTaskHistory: () => WindowManager.getTaskHistory?.() || [] }
 })() 
