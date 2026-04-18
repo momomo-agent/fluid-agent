@@ -53,6 +53,7 @@
     <div id="chat-panel">
       <div id="chat-header">
         <div class="chat-title">Agent</div>
+        <button id="clear-chat-btn" onclick="document.getElementById('chat-messages').innerHTML='';Agent._messages=[];" title="Clear chat">⌫</button>
         <div id="worker-status"></div>
       </div>
       <div id="chat-messages"></div>
@@ -65,6 +66,8 @@
     </div>
   </div>
 
+  <script src="eventbus.js"></script>
+  <script src="scheduler.js"></script>
   <script src="lib/agentic-core.js"></script>
   <script src="lib/agentic.js"></script>
   <script src="lib/agentic-shell.js"></script>

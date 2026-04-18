@@ -157,23 +157,52 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'SF P
 .window:hover .window-resize { opacity: 1; }
 
 /* ── Finder ── */
-.finder-path {
-  padding: 8px 14px; font-size: 12px; color: var(--text-dim);
-  border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.3);
-  font-weight: 500;
-}
-.finder-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-  gap: 4px; padding: 12px;
-}
-.finder-item {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: 10px 4px; border-radius: var(--radius-sm); cursor: pointer;
-  transition: background 0.12s;
-}
+.finder-layout { display: flex; height: 100%; }
+.finder-sidebar { width: 140px; flex-shrink: 0; background: var(--surface2); border-right: 1px solid var(--border); padding: 8px 0; overflow-y: auto; }
+.finder-sb-title { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 12px 4px; }
+.finder-sb-item { font-size: 12px; color: var(--text-dim); padding: 4px 12px; cursor: pointer; border-radius: 4px; margin: 0 4px; transition: background 0.12s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.finder-sb-item:hover { background: var(--accent-dim); }
+.finder-sb-item.active { background: var(--accent-dim); color: var(--text); }
+.finder-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.finder-toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.03); }
+.finder-nav-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; transition: all 0.12s; }
+.finder-nav-btn:hover:not(.disabled) { background: var(--surface3); color: var(--text); }
+.finder-nav-btn.disabled { opacity: 0.3; cursor: default; }
+.finder-breadcrumb { flex: 1; display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--text-muted); overflow: hidden; }
+.finder-crumb { cursor: pointer; padding: 2px 4px; border-radius: 3px; white-space: nowrap; }
+.finder-crumb:hover { background: var(--accent-dim); color: var(--text); }
+.finder-crumb-sep { color: var(--text-muted); opacity: 0.5; }
+.finder-view-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); font-size: 13px; padding: 3px 8px; border-radius: 4px; cursor: pointer; }
+.finder-view-btn:hover { background: var(--surface3); color: var(--text); }
+.finder-path { padding: 8px 14px; font-size: 12px; color: var(--text-dim); border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.03); font-weight: 500; }
+.finder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 4px; padding: 12px; flex: 1; overflow-y: auto; align-content: start; }
+.finder-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: var(--radius-sm); cursor: pointer; transition: background 0.12s; }
 .finder-item:hover { background: var(--accent-dim); }
+.finder-item.finder-selected { background: var(--accent-dim); outline: 1px solid var(--accent); }
 .finder-item .icon { font-size: 28px; line-height: 1; }
 .finder-item .name { font-size: 11px; color: var(--text-dim); text-align: center; word-break: break-all; max-width: 72px; line-height: 1.3; }
+.finder-list { flex: 1; overflow-y: auto; font-size: 12px; }
+.finder-list-header { display: flex; padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.finder-list-row { display: flex; padding: 5px 12px; cursor: pointer; transition: background 0.12s; border-bottom: 1px solid rgba(255,255,255,0.03); }
+.finder-list-row:hover { background: var(--accent-dim); }
+.finder-list-row.finder-selected { background: var(--accent-dim); outline: 1px solid var(--accent); }
+.fl-name { flex: 3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.fl-size { flex: 1; color: var(--text-muted); text-align: right; }
+.fl-date { flex: 1; color: var(--text-muted); text-align: right; }
+.finder-sidebar-section { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 12px 4px; }
+.finder-sidebar-item { font-size: 12px; color: var(--text-dim); padding: 4px 12px; cursor: pointer; border-radius: 4px; margin: 0 4px; transition: background 0.12s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.finder-sidebar-item:hover { background: var(--accent-dim); }
+.finder-sidebar-item.active { background: var(--accent-dim); color: var(--text); }
+.finder-list-col { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.finder-col-name { flex: 3; color: var(--text); }
+.finder-col-size { flex: 1; color: var(--text-muted); text-align: right; }
+.finder-col-date { flex: 1; color: var(--text-muted); text-align: right; }
+.finder-nav-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* ── Voice Preview ── */
+.voice-preview-btn { background: var(--accent-dim); border: 1px solid var(--border); color: var(--accent); font-size: 11px; padding: 3px 10px; border-radius: 4px; cursor: pointer; transition: all 0.15s; margin-left: 6px; }
+.voice-preview-btn:hover { background: var(--accent); color: white; }
+.voice-preview-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Terminal ── */
 .terminal-body {
@@ -295,6 +324,15 @@ del { text-decoration: line-through; color: rgba(0,0,0,0.4); }
 .tm-log { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 3px; }
 .tm-log-line { font-size: 11px; color: var(--text-muted); font-family: monospace; }
 .tm-empty { padding: 16px; font-size: 12px; color: var(--text-muted); }
+.tm-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.tm-tab { padding: 5px 12px; font-size: 11px; background: none; border: none; border-radius: 6px 6px 0 0; color: var(--text-muted); cursor: pointer; transition: color 0.15s; }
+.tm-tab:hover { color: var(--text); }
+.tm-tab.active { color: var(--text); background: var(--surface2); }
+.tm-queue { flex: 1; overflow-y: auto; padding: 8px 0; }
+.tm-queue-section { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 14px 4px; }
+.tm-queue-item { display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; }
+.tm-queue-item.running { color: var(--accent); }
+.tm-queue-item.pending { color: var(--text-muted); }
 
 /* ── Chat Panel ── */
 #chat-panel {
@@ -443,7 +481,7 @@ select.settings-input { appearance: none; cursor: pointer; }
 
 /* ── Music Player ── */
 .music-player { display: flex; flex-direction: column; height: 100%; padding: 16px; gap: 12px; overflow-y: auto; }
-.music-art { display: flex; align-items: center; justify-content: center; height: 120px; border-radius: 12px; flex-shrink: 0; }
+.music-art { display: flex; align-items: center; justify-content: center; height: 120px; border-radius: 12px; flex-shrink: 0; overflow: hidden; position: relative; }
 .music-art-icon { font-size: 48px; }
 .music-info { text-align: center; }
 .music-title { font-size: 15px; font-weight: 600; color: var(--text); }
@@ -465,6 +503,13 @@ select.settings-input { appearance: none; cursor: pointer; }
 .music-track-title { color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .music-track-artist { color: var(--text-muted); font-size: 11px; }
 .music-track-dur { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
+.music-art-img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; }
+.music-track-thumb { width: 24px; height: 24px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+
+/* ── Voice Preview ── */
+.voice-preview-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); font-size: 11px; padding: 3px 10px; border-radius: 4px; cursor: pointer; margin-left: 8px; transition: all 0.15s; }
+.voice-preview-btn:hover { background: var(--surface3); color: var(--text); }
+.voice-preview-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Video Player ── */
 .video-player { width: 100%; height: 100%; background: #000; display: flex; align-items: center; justify-content: center; }

@@ -203,12 +203,16 @@ const WindowManager = (() => {
     focus(id)
     updateDock()
     saveSession()
+    EventBus.emit('window.opened', { id, type, title: title || type })
     return id
   }
 
   function close(id) {
     const w = windows.get(id)
     if (!w) return
+    const title = w.el.querySelector('.window-title')?.textContent || w.type
+    EventBus.emit('user.action', { type: 'window.close', window: w.type, title })
+    EventBus.emit('window.closed', { id, type: w.type, title })
     w.el.classList.add('closing')
     setTimeout(() => {
       w.el.remove()
@@ -222,11 +226,14 @@ const WindowManager = (() => {
     windows.forEach(win => win.el.classList.remove('focused'))
     w.el.style.zIndex = ++topZ
     w.el.classList.add('focused')
+    EventBus.emit('user.action', { type: 'window.focus', window: w.type, title: w.el.querySelector('.window-title')?.textContent || w.type })
+    EventBus.emit('window.focused', { id, type: w.type })
   }
 
   function minimize(id) {
     const w = windows.get(id)
     if (!w) return
+    EventBus.emit('user.action', { type: 'window.minimize', window: w.type })
     w.el.classList.add('minimized')
     w.minimized = true
     updateDock()
@@ -285,37 +292,155 @@ const WindowManager = (() => {
   // ── Finder ──
   function renderFinder(w, body) {
     const path = w.data.path || '/home/user/Desktop'
+    // Initialize navigation history
+    if (!w.data.history) w.data.history = [path]
+    if (!w.data.historyIdx) w.data.historyIdx = 0
+    if (!w.data.viewMode) w.data.viewMode = 'grid'
     const items = VFS.ls(path) || []
+
+    // Sidebar favorites
+    const favorites = [
+      { name: 'Desktop', path: '/home/user/Desktop', icon: '🖥️' },
+      { name: 'Documents', path: '/home/user/Documents', icon: '📄' },
+      { name: 'Downloads', path: '/home/user/Downloads', icon: '📥' },
+    ]
+    const locations = [
+      { name: 'Home', path: '/home/user', icon: '🏠' },
+    ]
+
+    // Breadcrumb segments
+    const segments = path === '/' ? ['/'] : path.split('/').filter(Boolean)
+
     body.innerHTML = `
-      <div class="finder-path">📁 ${path}</div>
-      <div class="finder-grid">
-        ${path !== '/' ? '<div class="finder-item" data-path=".."><div class="icon">⬆️</div><div class="name">..</div></div>' : ''}
-        ${items.map(i => `
-          <div class="finder-item" data-path="${i.name}" data-type="${i.type}">
-            <div class="icon">${i.type === 'dir' ? '📁' : fileIcon(i.name)}</div>
-            <div class="name">${i.name}</div>
+      <div class="finder-layout">
+        <div class="finder-sidebar">
+          <div class="finder-sidebar-section">Favorites</div>
+          ${favorites.map(f => `<div class="finder-sidebar-item ${path === f.path ? 'active' : ''}" data-path="${f.path}">${f.icon} ${f.name}</div>`).join('')}
+          <div class="finder-sidebar-section">Locations</div>
+          ${locations.map(f => `<div class="finder-sidebar-item ${path === f.path ? 'active' : ''}" data-path="${f.path}">${f.icon} ${f.name}</div>`).join('')}
+        </div>
+        <div class="finder-main">
+          <div class="finder-toolbar">
+            <button class="finder-nav-btn" id="finder-back" ${w.data.historyIdx <= 0 ? 'disabled' : ''}>◀</button>
+            <button class="finder-nav-btn" id="finder-forward" ${w.data.historyIdx >= w.data.history.length - 1 ? 'disabled' : ''}>▶</button>
+            <div class="finder-breadcrumb">
+              ${path === '/' ? '<span class="finder-crumb" data-path="/">/</span>' : segments.map((seg, i) => {
+                const segPath = '/' + segments.slice(0, i + 1).join('/')
+                return `<span class="finder-crumb" data-path="${segPath}">${seg}</span>`
+              }).join('<span class="finder-crumb-sep">/</span>')}
+            </div>
+            <button class="finder-view-btn" id="finder-view-toggle" title="Toggle view">${w.data.viewMode === 'grid' ? '☰' : '⊞'}</button>
           </div>
-        `).join('')}
+          ${w.data.viewMode === 'list' ? `
+            <div class="finder-list">
+              <div class="finder-list-header">
+                <span class="finder-list-col finder-col-name" data-sort="name">Name</span>
+                <span class="finder-list-col finder-col-size" data-sort="size">Size</span>
+                <span class="finder-list-col finder-col-date" data-sort="date">Modified</span>
+              </div>
+              ${path !== '/' ? `<div class="finder-list-row" data-path=".." data-type="dir">
+                <span class="finder-list-col finder-col-name">⬆️ ..</span>
+                <span class="finder-list-col finder-col-size">—</span>
+                <span class="finder-list-col finder-col-date">—</span>
+              </div>` : ''}
+              ${items.map(i => `
+                <div class="finder-list-row ${w.data.selected === i.name ? 'finder-selected' : ''}" data-path="${i.name}" data-type="${i.type}">
+                  <span class="finder-list-col finder-col-name">${i.type === 'dir' ? '📁' : fileIcon(i.name)} ${i.name}</span>
+                  <span class="finder-list-col finder-col-size">${i.type === 'dir' ? '—' : (i.size != null ? formatSize(i.size) : '—')}</span>
+                  <span class="finder-list-col finder-col-date">${i.modified ? new Date(i.modified).toLocaleDateString() : '—'}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : `
+            <div class="finder-grid">
+              ${path !== '/' ? '<div class="finder-item" data-path=".."><div class="icon">⬆️</div><div class="name">..</div></div>' : ''}
+              ${items.map(i => `
+                <div class="finder-item ${w.data.selected === i.name ? 'finder-selected' : ''}" data-path="${i.name}" data-type="${i.type}">
+                  <div class="icon">${i.type === 'dir' ? '📁' : fileIcon(i.name)}</div>
+                  <div class="name">${i.name}</div>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
       </div>
     `
-    body.querySelectorAll('.finder-item').forEach(el => {
+
+    function navigateTo(newPath) {
+      w.data.path = newPath
+      // Update history
+      w.data.history = w.data.history.slice(0, w.data.historyIdx + 1)
+      w.data.history.push(newPath)
+      w.data.historyIdx = w.data.history.length - 1
+      w.data.selected = null
+      w.el.querySelector('.window-title').textContent = newPath.split('/').pop() || '/'
+      renderFinder(w, body)
+    }
+
+    // Sidebar navigation
+    body.querySelectorAll('.finder-sidebar-item').forEach(el => {
+      el.addEventListener('click', () => navigateTo(el.dataset.path))
+    })
+
+    // Back/Forward
+    body.querySelector('#finder-back')?.addEventListener('click', () => {
+      if (w.data.historyIdx > 0) {
+        w.data.historyIdx--
+        w.data.path = w.data.history[w.data.historyIdx]
+        w.data.selected = null
+        w.el.querySelector('.window-title').textContent = w.data.path.split('/').pop() || '/'
+        renderFinder(w, body)
+      }
+    })
+    body.querySelector('#finder-forward')?.addEventListener('click', () => {
+      if (w.data.historyIdx < w.data.history.length - 1) {
+        w.data.historyIdx++
+        w.data.path = w.data.history[w.data.historyIdx]
+        w.data.selected = null
+        w.el.querySelector('.window-title').textContent = w.data.path.split('/').pop() || '/'
+        renderFinder(w, body)
+      }
+    })
+
+    // Breadcrumb navigation
+    body.querySelectorAll('.finder-crumb').forEach(el => {
+      el.addEventListener('click', () => navigateTo(el.dataset.path))
+    })
+
+    // View toggle
+    body.querySelector('#finder-view-toggle')?.addEventListener('click', () => {
+      w.data.viewMode = w.data.viewMode === 'grid' ? 'list' : 'grid'
+      renderFinder(w, body)
+    })
+
+    // File items (both grid and list)
+    const fileItems = body.querySelectorAll('.finder-item, .finder-list-row')
+    fileItems.forEach(el => {
+      // Single click = select
+      el.addEventListener('click', (e) => {
+        const name = el.dataset.path
+        if (name === '..') return
+        w.data.selected = name
+        // Update selection visuals without full re-render
+        fileItems.forEach(fi => fi.classList.remove('finder-selected'))
+        el.classList.add('finder-selected')
+      })
+
+      // Double click = open
       el.addEventListener('dblclick', () => {
         const name = el.dataset.path
         const type = el.dataset.type
         if (name === '..') {
           const parent = path.split('/').slice(0, -1).join('/') || '/'
-          w.data.path = parent
-          w.el.querySelector('.window-title').textContent = parent.split('/').pop() || '/'
-          renderFinder(w, body)
+          navigateTo(parent)
         } else if (type === 'dir') {
-          w.data.path = VFS.normPath(path + '/' + name)
-          w.el.querySelector('.window-title').textContent = name
-          renderFinder(w, body)
+          navigateTo(VFS.normPath(path + '/' + name))
         } else {
-          // Open file in editor
           openEditor(VFS.normPath(path + '/' + name))
         }
       })
+
+      // Context menu
       el.addEventListener('contextmenu', (ev) => {
         const name = el.dataset.path
         if (name === '..') return
@@ -324,30 +449,51 @@ const WindowManager = (() => {
         if (!window.showContextMenu) return
         const type = el.dataset.type
         const fullPath = VFS.normPath(path + '/' + name)
-        const items = []
+        const menuItems = []
         if (type === 'dir') {
-          items.push({ label: 'Open', action: () => { w.data.path = fullPath; w.el.querySelector('.window-title').textContent = name; renderFinder(w, body) } })
+          menuItems.push({ label: 'Open', action: () => navigateTo(fullPath) })
         } else {
-          items.push({ label: 'Open', action: () => openEditor(fullPath) })
+          menuItems.push({ label: 'Open', action: () => openEditor(fullPath) })
         }
-        items.push({ label: 'Copy Path', action: () => navigator.clipboard?.writeText(fullPath) })
-        items.push('---')
-        items.push({ label: 'Rename', action: () => {
+        menuItems.push({ label: 'Copy Path', action: () => navigator.clipboard?.writeText(fullPath) })
+        menuItems.push('---')
+        menuItems.push({ label: 'Rename', action: () => {
           const newName = prompt('Rename to:', name)
           if (newName && newName !== name) {
             const content = VFS.readFile(fullPath)
             const newPath = VFS.normPath(path + '/' + newName)
             if (content != null) { VFS.writeFile(newPath, content); VFS.rm(fullPath) }
             else if (VFS.isDir(fullPath)) { VFS.mkdir(newPath); VFS.rm(fullPath) }
+            EventBus.emit('user.action', { type: 'file.rename', path: fullPath, newName })
             renderFinder(w, body)
           }
         }})
-        items.push({ label: 'Delete', action: () => {
-          if (confirm(`Delete ${name}?`)) { VFS.rm(fullPath); renderFinder(w, body) }
+        menuItems.push({ label: 'Delete', action: () => {
+          if (confirm(`Delete ${name}?`)) {
+            EventBus.emit('user.action', { type: 'file.delete', path: fullPath })
+            VFS.rm(fullPath)
+            renderFinder(w, body)
+          }
         }})
-        window.showContextMenu(ev.clientX, ev.clientY, items)
+        window.showContextMenu(ev.clientX, ev.clientY, menuItems)
       })
     })
+
+    // Sort by column headers (list view)
+    body.querySelectorAll('.finder-list-col[data-sort]')?.forEach(el => {
+      el.style.cursor = 'pointer'
+      el.addEventListener('click', () => {
+        // Simple sort toggle — just re-render for now
+        // Could add w.data.sortBy / w.data.sortDir for persistent sorting
+      })
+    })
+  }
+
+  function formatSize(bytes) {
+    if (bytes == null) return '—'
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
   function fileIcon(name) {
@@ -397,13 +543,13 @@ const WindowManager = (() => {
             const m = cmd.trim().match(/^play(?:\s+(\d+))?$/i)
             const idx = m[1] != null ? parseInt(m[1]) : null
             WindowManager.openMusic()
-            window.dispatchEvent(new CustomEvent('music-control', { detail: { action: 'play', track: idx } }))
+            EventBus.emit('music.control', { action: 'play', track: idx })
             appendOutput(output, idx != null ? `Playing track ${idx}` : 'Playing music', 'output')
           } else if (cmd.trim() === 'pause' || cmd.trim() === 'stop') {
-            window.dispatchEvent(new CustomEvent('music-control', { detail: { action: 'pause' } }))
+            EventBus.emit('music.control', { action: 'pause' })
             appendOutput(output, 'Music paused', 'output')
           } else if (cmd.trim() === 'next') {
-            window.dispatchEvent(new CustomEvent('music-control', { detail: { action: 'next' } }))
+            EventBus.emit('music.control', { action: 'next' })
             appendOutput(output, 'Next track', 'output')
           } else {
             const result = await Shell.execAsync(cmd)
@@ -646,14 +792,29 @@ const WindowManager = (() => {
     if (taskManagerId && windows.has(taskManagerId)) renderTaskManager(task?.id)
   }
 
-  function renderTaskManager(selectedId) {
+  function renderTaskManager(selectedId, view) {
     const w = windows.get(taskManagerId)
     if (!w) return
     const body = w.el.querySelector('.window-body')
+    const currentView = view || body.dataset.view || 'detail'
+    body.dataset.view = currentView
     const sel = selectedId || taskHistory[0]?.id
     const selected = taskHistory.find(t => t.id === sel) || taskHistory[0]
 
+    // Queue overview from Dispatcher
+    const ds = typeof Dispatcher !== 'undefined' ? Dispatcher.getState() : { running: [], pending: [] }
+
     body.innerHTML = `<div class="tm-layout">
+      <div class="tm-tabs">
+        <button class="tm-tab ${currentView === 'detail' ? 'active' : ''}" data-view="detail">Tasks</button>
+        <button class="tm-tab ${currentView === 'queue' ? 'active' : ''}" data-view="queue">Queue${ds.running.length + ds.pending.length > 0 ? ` · ${ds.running.length + ds.pending.length}` : ''}</button>
+      </div>
+      ${currentView === 'queue' ? `
+      <div class="tm-queue">
+        ${ds.running.length ? `<div class="tm-queue-section">Running</div>${ds.running.map(r => `<div class="tm-queue-item running"><span>▶</span><span>${r.task.slice(0,50)}</span></div>`).join('')}` : ''}
+        ${ds.pending.length ? `<div class="tm-queue-section">Queued</div>${ds.pending.map(p => `<div class="tm-queue-item pending"><span>${p.priority === 0 ? '⚡' : p.priority === 2 ? '💤' : '○'}</span><span>${p.task.slice(0,50)}</span></div>`).join('')}` : ''}
+        ${!ds.running.length && !ds.pending.length ? '<div class="tm-empty">Queue is empty</div>' : ''}
+      </div>` : `
       <div class="tm-list">${taskHistory.map(t => `
         <div class="tm-item ${t.status} ${t.id === selected?.id ? 'active' : ''}" data-id="${t.id}">
           <span class="tm-status-dot"></span>
@@ -669,11 +830,14 @@ const WindowManager = (() => {
           </div>`).join('')}
         </div>
         ${selected.log.length ? `<div class="tm-log">${selected.log.slice(-8).map(l => `<div class="tm-log-line">${l}</div>`).join('')}</div>` : ''}
-      ` : '<div class="tm-empty">Select a task</div>'}</div>
+      ` : '<div class="tm-empty">Select a task</div>'}</div>`}
     </div>`
 
     body.querySelectorAll('.tm-item').forEach(el => {
-      el.addEventListener('click', () => renderTaskManager(el.dataset.id))
+      el.addEventListener('click', () => renderTaskManager(el.dataset.id, 'detail'))
+    })
+    body.querySelectorAll('.tm-tab').forEach(el => {
+      el.addEventListener('click', () => renderTaskManager(sel, el.dataset.view))
     })
   }
 
@@ -705,6 +869,16 @@ const WindowManager = (() => {
         path: w.data?.path || null,
       })),
       focusedWindow: focused ? { type: focused.type, title: focused.el.querySelector('.window-title')?.textContent, path: focused.data?.path } : null,
+      music: {
+        playing: musicState.playing,
+        current: musicState.playlist[musicState.current] ? {
+          title: musicState.playlist[musicState.current].title,
+          artist: musicState.playlist[musicState.current].artist,
+          elapsed: musicState.elapsed,
+          duration: musicState.playlist[musicState.current].duration,
+        } : null,
+        playlistCount: musicState.playlist.length,
+      },
     }
   }
 
@@ -839,7 +1013,32 @@ const WindowManager = (() => {
       const voice = voicesCache?.find(v => v.voice_id === id)
       if (voice) {
         const labels = voice.labels ? Object.entries(voice.labels).map(([k,v]) => `${k}: ${v}`).join(' · ') : ''
-        elPreview.innerHTML = `<span style="font-size:12px;color:var(--text-muted)">${labels || voice.category || ''}</span>`
+        elPreview.innerHTML = `<span style="font-size:12px;color:var(--text-muted)">${labels || voice.category || ''}</span> <button class="voice-preview-btn" title="Preview voice">▶ Preview</button>`
+        elPreview.querySelector('.voice-preview-btn')?.addEventListener('click', () => {
+          const apiKey = elKeyInput.value.trim()
+          if (!apiKey || !id) return
+          const btn = elPreview.querySelector('.voice-preview-btn')
+          btn.textContent = '⏳'
+          btn.disabled = true
+          fetch('https://api.elevenlabs.io/v1/text-to-speech/' + id, {
+            method: 'POST',
+            headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: "Hello, I'm your assistant.", model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.5, similarity_boost: 0.75 } })
+          })
+          .then(r => { if (!r.ok) throw new Error(r.status); return r.blob() })
+          .then(blob => {
+            const url = URL.createObjectURL(blob)
+            const audio = new Audio(url)
+            audio.play()
+            audio.onended = () => URL.revokeObjectURL(url)
+            btn.textContent = '▶ Preview'
+            btn.disabled = false
+          })
+          .catch(() => {
+            btn.textContent = '▶ Preview'
+            btn.disabled = false
+          })
+        })
       } else elPreview.innerHTML = ''
     }
 
@@ -973,27 +1172,56 @@ const WindowManager = (() => {
   function musicPlay(s) {
     clearInterval(s.timer)
     s.playing = true
-    AudioSynth.play(s.current, s.elapsed, () => {
-      // Auto-next
-      s.current = (s.current + 1) % s.playlist.length
-      s.elapsed = 0
-      musicPlay(s)
-      musicRerender()
-    })
-    s.timer = setInterval(() => {
-      s.elapsed += 1
-      if (s.elapsed >= s.playlist[s.current].duration) {
+    const track = s.playlist[s.current]
+    EventBus.emit('music.stateChange', { playing: true, current: track, playlistCount: s.playlist.length })
+    if (track.url) {
+      // External URL track — use Audio element
+      if (!s._audio) s._audio = new Audio()
+      s._audio.src = track.url
+      s._audio.currentTime = s.elapsed
+      s._audio.play().catch(() => {})
+      s._audio.onended = () => {
         s.current = (s.current + 1) % s.playlist.length
         s.elapsed = 0
+        musicPlay(s)
+        musicRerender()
       }
-      musicRerender()
-    }, 1000)
+      s._audio.onloadedmetadata = () => {
+        if (!track._durationSet) {
+          track.duration = Math.floor(s._audio.duration) || track.duration || 180
+          track._durationSet = true
+          musicRerender()
+        }
+      }
+      s.timer = setInterval(() => {
+        s.elapsed = Math.floor(s._audio.currentTime || s.elapsed)
+        musicRerender()
+      }, 1000)
+    } else {
+      // Synth track
+      AudioSynth.play(s.current, s.elapsed, () => {
+        s.current = (s.current + 1) % s.playlist.length
+        s.elapsed = 0
+        musicPlay(s)
+        musicRerender()
+      })
+      s.timer = setInterval(() => {
+        s.elapsed += 1
+        if (s.elapsed >= s.playlist[s.current].duration) {
+          s.current = (s.current + 1) % s.playlist.length
+          s.elapsed = 0
+        }
+        musicRerender()
+      }, 1000)
+    }
   }
 
   function musicPause(s) {
     clearInterval(s.timer)
     s.playing = false
+    if (s._audio) { s._audio.pause() }
     AudioSynth.stop()
+    EventBus.emit('music.stateChange', { playing: false, current: s.playlist[s.current], playlistCount: s.playlist.length })
   }
 
   function musicRerender() {
@@ -1014,9 +1242,13 @@ const WindowManager = (() => {
     const pct = track.duration > 0 ? (s.elapsed / track.duration * 100) : 0
     const fmt = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
 
+    const artHtml = track.artwork
+      ? `<img src="${track.artwork}" class="music-art-img" alt="">`
+      : `<div class="music-art-icon" style="color: ${track.color || '#60a5fa'}">${s.playing ? '♫' : '♪'}</div>`
+
     body.innerHTML = `<div class="music-player">
-      <div class="music-art" style="background: linear-gradient(135deg, ${track.color}33, ${track.color}11)">
-        <div class="music-art-icon" style="color: ${track.color}">${s.playing ? '♫' : '♪'}</div>
+      <div class="music-art" style="background: linear-gradient(135deg, ${track.color || '#60a5fa'}33, ${track.color || '#60a5fa'}11)">
+        ${artHtml}
       </div>
       <div class="music-info">
         <div class="music-title">${track.title}</div>
@@ -1033,7 +1265,7 @@ const WindowManager = (() => {
       </div>
       <div class="music-list">${s.playlist.map((t, i) => `
         <div class="music-track ${i === s.current ? 'active' : ''}" data-idx="${i}">
-          <span class="music-track-dot" style="background:${t.color}"></span>
+          ${t.artwork ? `<img src="${t.artwork}" class="music-track-thumb" alt="">` : `<span class="music-track-dot" style="background:${t.color || '#60a5fa'}"></span>`}
           <span class="music-track-title">${t.title}</span>
           <span class="music-track-artist">${t.artist}</span>
           <span class="music-track-dur">${fmt(t.duration)}</span>
@@ -1042,20 +1274,24 @@ const WindowManager = (() => {
     </div>`
 
     body.querySelector('#music-toggle').addEventListener('click', () => {
-      if (s.playing) musicPause(s)
+      const wasPlaying = s.playing
+      if (wasPlaying) musicPause(s)
       else musicPlay(s)
+      EventBus.emit('user.action', { type: wasPlaying ? 'music.pause' : 'music.play', track: s.playlist[s.current]?.title })
       renderMusic(w, body)
     })
     body.querySelector('#music-prev').addEventListener('click', () => {
       musicPause(s)
       s.current = (s.current - 1 + s.playlist.length) % s.playlist.length
       s.elapsed = 0
+      EventBus.emit('user.action', { type: 'music.prev', track: s.playlist[s.current]?.title })
       renderMusic(w, body)
     })
     body.querySelector('#music-next').addEventListener('click', () => {
       musicPause(s)
       s.current = (s.current + 1) % s.playlist.length
       s.elapsed = 0
+      EventBus.emit('user.action', { type: 'music.next', track: s.playlist[s.current]?.title })
       renderMusic(w, body)
     })
     body.querySelectorAll('.music-track').forEach(el => {
@@ -1064,14 +1300,14 @@ const WindowManager = (() => {
         s.current = parseInt(el.dataset.idx)
         s.elapsed = 0
         musicPlay(s)
+        EventBus.emit('user.action', { type: 'music.play', track: s.playlist[s.current]?.title })
         renderMusic(w, body)
       })
     })
   }
 
-  // Agent music control via custom event
-  window.addEventListener('music-control', (e) => {
-    const { action, track } = e.detail
+  // Agent music control via EventBus
+  EventBus.on('music.control', ({ action, track }) => {
     const s = musicState
     if (track != null && track >= 0 && track < s.playlist.length) {
       musicPause(s)
@@ -1384,14 +1620,12 @@ document.getElementById('search').addEventListener('keydown', function(e) {
     body.appendChild(iframe)
   }
 
-  // Agent browser control
-  window.addEventListener('browser-control', (e) => {
-    const { action, url } = e.detail
-    // Find or create browser window
+  // Agent browser control via EventBus
+  EventBus.on('browser.control', ({ action, url }) => {
     let bw = null
     for (const [, w] of windows) { if (w.type === 'browser') { bw = w; break } }
     if (!bw) {
-      const id = openBrowser(action === 'navigate' ? url : '')
+      openBrowser(action === 'navigate' ? url : '')
       return
     }
     if (action === 'navigate' && url) {
@@ -1407,9 +1641,8 @@ document.getElementById('search').addEventListener('keydown', function(e) {
     }
   })
 
-  // Agent video control
-  window.addEventListener('video-control', (e) => {
-    const { action } = e.detail
+  // Agent video control via EventBus
+  EventBus.on('video.control', ({ action }) => {
     for (const [, w] of windows) {
       if (w.type !== 'video') continue
       const video = w.el.querySelector('video')
@@ -1417,6 +1650,21 @@ document.getElementById('search').addEventListener('keydown', function(e) {
       if (action === 'play') video.play()
       else if (action === 'pause') video.pause()
       else if (action === 'fullscreen') video.requestFullscreen?.().catch(() => {})
+    }
+  })
+
+  // --- EventBus: window.open handler ---
+  EventBus.on('window.open', ({ type, ...opts }) => {
+    switch (type) {
+      case 'finder': openFinder(opts.path || '/home/user'); break
+      case 'editor': openEditor(opts.path); break
+      case 'terminal': openTerminal(); break
+      case 'browser': openBrowser(opts.url); break
+      case 'music': openMusic(); break
+      case 'video': openVideo(opts.url, opts.title); break
+      case 'map': openMap(opts.lat, opts.lng, opts.zoom); break
+      case 'image': openImage(opts.src, opts.title); break
+      case 'settings': openSettings(); break
     }
   })
 
@@ -1669,8 +1917,17 @@ ${css}
     return b
   }
 
-  function musicAddTrack({ title, artist, style }) {
+  function musicAddTrack({ title, artist, style, url, artwork }) {
     if (!title) return { error: 'title is required' }
+    if (url) {
+      // External URL track
+      const entry = { title: title || 'Untitled', artist: artist || 'Unknown', color: '#60a5fa', duration: 180, url, artwork }
+      musicState.playlist.push(entry)
+      const idx = musicState.playlist.length - 1
+      musicRerender()
+      return { index: idx }
+    }
+    // Synth track (existing behavior)
     const s = SYNTH_STYLES[style] || SYNTH_STYLES.dreamy
     const trackDef = {
       melody: generateMelody(16),

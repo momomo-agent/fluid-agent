@@ -103,6 +103,7 @@
     document.querySelectorAll('.dock-pinned .dock-item').forEach(item => {
       item.addEventListener('click', () => {
         const app = item.dataset.app
+        EventBus.emit('user.action', { type: 'dock.click', app })
         switch (app) {
           case 'finder': WindowManager.openFinder('/home/user'); break
           case 'terminal': WindowManager.openTerminal(); break
@@ -161,7 +162,7 @@
     function updateTaskHoverPanel() {
       const bb = Agent.blackboard
       const ct = bb.currentTask
-      const queued = Agent.getTaskQueue ? Agent.getTaskQueue() : []
+      const queued = Agent.getScheduler ? Agent.getScheduler().getState().pending : []
       const history = WindowManager.getTaskHistory ? WindowManager.getTaskHistory() : []
 
       let html = '<div class="thp-header"><span class="thp-title">Task Manager</span></div>'
@@ -189,7 +190,7 @@
       if (queued.length > 0) {
         html += `<div class="thp-section"><div class="thp-section-label">Queued (${queued.length})</div>`
         queued.forEach(q => {
-          html += `<div class="thp-task"><div class="thp-task-row"><span class="thp-task-name">${q.taskDescription?.slice(0, 50) || 'Queued'}</span><span class="thp-task-badge queued">Queued</span></div></div>`
+          html += `<div class="thp-task"><div class="thp-task-row"><span class="thp-task-name">#${q.id} ${(q.task || 'Queued').slice(0, 50)}</span><span class="thp-task-badge queued">Queued</span></div></div>`
         })
         html += '</div>'
       }
@@ -229,7 +230,8 @@
         const steps = bb.currentTask.steps || []
         const doneCount = steps.filter(s => s.status === 'done').length
         const total = steps.length
-        const queued = Agent.getTaskQueue ? Agent.getTaskQueue().length : 0
+        const schedulerState = Agent.getScheduler ? Agent.getScheduler().getState() : { pending: [], running: [] }
+        const queued = schedulerState.pending.length + Math.max(0, schedulerState.running.length - 1)
         const queueText = queued > 0 ? ` +${queued}` : ''
         taskStatusEl.innerHTML = `<div class="spinner"></div><span class="island-goal">${goal}</span>${queueText ? `<span class="island-meta">${queueText}</span>` : ''}`
         taskStatusEl.classList.add('island-active')

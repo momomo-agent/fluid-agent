@@ -2,9 +2,7 @@
 const Agent = (() => {
   let ai = null
   const messages = []
-  let workerRunning = false
-  let workerAbort = null
-  const taskQueue = []
+  // Scheduler handles task queue + parallel slots (see scheduler.js)
 
   // --- Chat persistence via agentic glue ---
   const MAX_MESSAGES = 50
@@ -355,8 +353,7 @@ const Agent = (() => {
         showActivity(`↪ Steering: ${action.instruction?.slice(0, 40)}`)
       } else if (action?.action === 'abort') {
         renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
-        if (workerAbort) { workerAbort.abort(); workerAbort = null }
-        taskQueue.length = 0
+        Scheduler.abort(null)
         setWorkerStatus('')
         showActivity('Tasks cleared')
       } else if (action?.action === 'remember') {
@@ -438,8 +435,9 @@ const Agent = (() => {
   }
 
   function buildTalkerSystem(os) {
-    const runningTasks = blackboard.currentTask?.status === 'running' ? [blackboard.currentTask] : []
-    const queuedCount = taskQueue.length
+    const schedulerState = Scheduler.getState()
+    const runningTasks = schedulerState.running
+    const queuedCount = schedulerState.pending.length
 
     // Read agent memory from VFS
     const memory = VFS.isFile('/system/memory/MEMORY.md') ? VFS.readFile('/system/memory/MEMORY.md') : ''
@@ -518,31 +516,17 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     try { return JSON.parse(m[1]) } catch { return null }
   }
 
-  // --- Priority task queue ---
-  // priority: 0=urgent, 1=normal (default), 2=background
+  // --- Task scheduling via Scheduler ---
   function enqueueTask(taskDescription, steps, priority = 1) {
-    taskQueue.push({ taskDescription, steps, priority })
-    taskQueue.sort((a, b) => a.priority - b.priority)
-    if (!workerRunning) drainQueue()
-    else {
+    Scheduler.enqueue(taskDescription, steps, priority, [])
+    if (!Scheduler.isIdle()) {
       const label = priority === 0 ? '⚡' : priority === 2 ? '💤' : '📥'
       showActivity(`${label} Queued: ${taskDescription.slice(0, 40)}...`)
     }
   }
 
-  async function drainQueue() {
-    while (taskQueue.length > 0) {
-      const { taskDescription, steps } = taskQueue.shift()
-      await startWorker(taskDescription, steps)
-    }
-    workerRunning = false
-    setWorkerStatus('')
-  }
-
-  async function startWorker(taskDescription, plannedSteps) {
-    workerRunning = true
-    const abort = new AbortController()
-    workerAbort = abort
+  // Scheduler calls this when a slot opens
+  async function startWorker(taskDescription, plannedSteps, abort) {
     // Use Task Manager instead of Plan window
     const task = WindowManager.addTask(taskDescription, plannedSteps || [])
     const steps = task.steps
@@ -569,13 +553,13 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       },
       open: ({ target, path, url, src, title, lat, lng, zoom }) => {
         switch (target) {
-          case 'finder': WindowManager.openFinder(path); showActivity(`Finder: ${path}`); break
-          case 'editor': WindowManager.openEditor(path); showActivity(`Opened ${path.split('/').pop()}`); break
-          case 'terminal': WindowManager.openTerminal(); showActivity('Opened Terminal'); break
-          case 'image': WindowManager.openImage(src || url, title); showActivity(`Opened image: ${title || 'image'}`); break
-          case 'browser': WindowManager.openBrowser(url); showActivity(`🌐 Browser: ${url || 'home'}`); break
-          case 'map': WindowManager.openMap(lat, lng, zoom); showActivity(`🗺️ Map`); break
-          case 'music': WindowManager.openMusic(); showActivity('🎵 Music'); break
+          case 'finder': EventBus.emit('window.open', { type: 'finder', path }); showActivity(`Finder: ${path}`); break
+          case 'editor': EventBus.emit('window.open', { type: 'editor', path }); showActivity(`Opened ${path.split('/').pop()}`); break
+          case 'terminal': EventBus.emit('window.open', { type: 'terminal' }); showActivity('Opened Terminal'); break
+          case 'image': EventBus.emit('window.open', { type: 'image', src: src || url, title }); showActivity(`Opened image: ${title || 'image'}`); break
+          case 'browser': EventBus.emit('window.open', { type: 'browser', url }); showActivity(`🌐 Browser: ${url || 'home'}`); break
+          case 'map': EventBus.emit('window.open', { type: 'map', lat, lng, zoom }); showActivity(`🗺️ Map`); break
+          case 'music': EventBus.emit('window.open', { type: 'music' }); showActivity('🎵 Music'); break
           default: return { error: `Unknown target: ${target}` }
         }
         return { success: true }
@@ -619,41 +603,40 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         showActivity(`🎨 Wallpaper changed`)
         return { success: true }
       },
-      music: ({ action, track, title, artist, style }) => {
-        WindowManager.openMusic()
+      music: ({ action, track, title, artist, style, url, artwork }) => {
+        EventBus.emit('window.open', { type: 'music' })
         if (action === 'add') {
-          // Agent can add tracks to the playlist
-          const result = WindowManager.musicAddTrack({ title, artist, style })
+          const result = WindowManager.musicAddTrack({ title, artist, style, url, artwork })
           if (result.error) return result
           showActivity(`🎵 Added: ${title}`)
           return { success: true, trackIndex: result.index, message: `Added "${title}" to playlist` }
         }
         if (action === 'add_and_play') {
-          const result = WindowManager.musicAddTrack({ title, artist, style })
+          const result = WindowManager.musicAddTrack({ title, artist, style, url, artwork })
           if (result.error) return result
-          window.dispatchEvent(new CustomEvent('music-control', { detail: { action: 'play', track: result.index } }))
+          EventBus.emit('music.control', { action: 'play', track: result.index })
           showActivity(`🎵 Playing: ${title}`)
           return { success: true, trackIndex: result.index }
         }
-        window.dispatchEvent(new CustomEvent('music-control', { detail: { action, track } }))
+        EventBus.emit('music.control', { action, track })
         showActivity(`🎵 Music: ${action}${track != null ? ' #' + track : ''}`)
         return { success: true }
       },
       browser: ({ action, url }) => {
         switch (action) {
-          case 'open': WindowManager.openBrowser(url); showActivity(`🌐 Browser: ${url || 'home'}`); break
-          case 'navigate': window.dispatchEvent(new CustomEvent('browser-control', { detail: { action: 'navigate', url } })); showActivity(`🌐 Navigate: ${url}`); break
-          case 'back': window.dispatchEvent(new CustomEvent('browser-control', { detail: { action: 'back' } })); break
+          case 'open': EventBus.emit('window.open', { type: 'browser', url }); showActivity(`🌐 Browser: ${url || 'home'}`); break
+          case 'navigate': EventBus.emit('browser.control', { action: 'navigate', url }); showActivity(`🌐 Navigate: ${url}`); break
+          case 'back': EventBus.emit('browser.control', { action: 'back' }); break
           default: return { error: `Unknown browser action: ${action}` }
         }
         return { success: true }
       },
       map: ({ action, lat, lng, label, color, zoom, from_lat, from_lng, to_lat, to_lng }) => {
         switch (action) {
-          case 'open': WindowManager.openMap(lat, lng, zoom); showActivity(`🗺️ Map`); break
-          case 'marker': WindowManager.openMap(); WindowManager.mapAddMarker(lat, lng, label, color); showActivity(`📍 Marker: ${label || `${lat}, ${lng}`}`); break
+          case 'open': EventBus.emit('window.open', { type: 'map', lat, lng, zoom }); showActivity(`🗺️ Map`); break
+          case 'marker': EventBus.emit('window.open', { type: 'map' }); WindowManager.mapAddMarker(lat, lng, label, color); showActivity(`📍 Marker: ${label || `${lat}, ${lng}`}`); break
           case 'clear_markers': WindowManager.mapClearMarkers(); break
-          case 'route': WindowManager.openMap(); WindowManager.mapShowRoute({ lat: from_lat, lng: from_lng }, { lat: to_lat, lng: to_lng }); showActivity(`🚗 Route`); break
+          case 'route': EventBus.emit('window.open', { type: 'map' }); WindowManager.mapShowRoute({ lat: from_lat, lng: from_lng }, { lat: to_lat, lng: to_lng }); showActivity(`🚗 Route`); break
           case 'clear_route': WindowManager.mapClearRoute(); break
           default: return { error: `Unknown map action: ${action}` }
         }
@@ -661,9 +644,9 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       },
       video: ({ action, url, title }) => {
         switch (action) {
-          case 'play': if (url) { WindowManager.openVideo(url, title); showActivity(`🎬 Video: ${title || 'player'}`) } else { window.dispatchEvent(new CustomEvent('video-control', { detail: { action: 'play' } })) }; break
-          case 'pause': window.dispatchEvent(new CustomEvent('video-control', { detail: { action: 'pause' } })); break
-          case 'fullscreen': window.dispatchEvent(new CustomEvent('video-control', { detail: { action: 'fullscreen' } })); break
+          case 'play': if (url) { EventBus.emit('window.open', { type: 'video', url, title }); showActivity(`🎬 Video: ${title || 'player'}`) } else { EventBus.emit('video.control', { action: 'play' }) }; break
+          case 'pause': EventBus.emit('video.control', { action: 'pause' }); break
+          case 'fullscreen': EventBus.emit('video.control', { action: 'fullscreen' }); break
           default: return { error: `Unknown video action: ${action}` }
         }
         return { success: true }
@@ -742,7 +725,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       open: { desc: 'Open a built-in app: finder, editor, terminal, image, browser, map, music', schema: { type: 'object', properties: { target: { type: 'string', enum: ['finder', 'editor', 'terminal', 'image', 'browser', 'map', 'music'] }, path: { type: 'string', description: 'For finder/editor' }, url: { type: 'string', description: 'For browser/image' }, src: { type: 'string', description: 'For image' }, title: { type: 'string' }, lat: { type: 'number' }, lng: { type: 'number' }, zoom: { type: 'number' } }, required: ['target'] } },
       window: { desc: 'Window management: close, move, resize, minimize, maximize, restore, focus, list, tile', schema: { type: 'object', properties: { action: { type: 'string', enum: ['close', 'move', 'resize', 'minimize', 'maximize', 'restore', 'focus', 'list', 'tile'] }, title: { type: 'string', description: 'Window title (for most actions)' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, layout: { type: 'string', enum: ['grid', 'horizontal', 'vertical'], description: 'For tile action' } }, required: ['action'] } },
       set_wallpaper: { desc: 'Change desktop wallpaper with preset, CSS gradient, or image URL', schema: { type: 'object', properties: { preset: { type: 'string', enum: ['aurora', 'sunset', 'ocean', 'forest', 'lavender', 'midnight', 'rose', 'sky'] }, css: { type: 'string' }, url: { type: 'string' } } } },
-      music: { desc: 'Control music player. Actions: play, pause, next, prev, add (add track to playlist), add_and_play (add and immediately play). For add/add_and_play: provide title, artist, and style (dreamy/bright/gentle/moody/playful).', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'add', 'add_and_play'] }, track: { type: 'number', description: '0-based track index for play' }, title: { type: 'string', description: 'Track title for add' }, artist: { type: 'string', description: 'Artist name for add' }, style: { type: 'string', enum: ['dreamy', 'bright', 'gentle', 'moody', 'playful'], description: 'Synth style for generated track' } }, required: ['action'] } },
+      music: { desc: 'Control music player. Actions: play, pause, next, prev, add (add track to playlist), add_and_play (add and immediately play). For add/add_and_play: provide title, artist, and optionally url (external audio URL like MP3) and artwork (album cover image URL). If no url, a synth track is generated using style.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'add', 'add_and_play'] }, track: { type: 'number', description: '0-based track index for play' }, title: { type: 'string', description: 'Track title for add' }, artist: { type: 'string', description: 'Artist name for add' }, style: { type: 'string', enum: ['dreamy', 'bright', 'gentle', 'moody', 'playful'], description: 'Synth style for generated track (ignored if url provided)' }, url: { type: 'string', description: 'External audio URL (MP3) for real music playback' }, artwork: { type: 'string', description: 'Album cover image URL' } }, required: ['action'] } },
       browser: { desc: 'Browser control: open, navigate to URL, go back', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'navigate', 'back'] }, url: { type: 'string' } }, required: ['action'] } },
       map: { desc: 'Map operations: open, add marker, clear markers, show route, clear route', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'marker', 'clear_markers', 'route', 'clear_route'] }, lat: { type: 'number' }, lng: { type: 'number' }, zoom: { type: 'number' }, label: { type: 'string' }, color: { type: 'string', enum: ['red', 'blue', 'green', 'orange', 'purple', 'pink', 'yellow'] }, from_lat: { type: 'number' }, from_lng: { type: 'number' }, to_lat: { type: 'number' }, to_lng: { type: 'number' } }, required: ['action'] } },
       video: { desc: 'Video player: play URL, pause, fullscreen', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'fullscreen'] }, url: { type: 'string', description: 'Video URL (for play)' }, title: { type: 'string' } }, required: ['action'] } },
@@ -827,7 +810,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         if (result.done) {
           task.status = 'done'
           blackboard.currentTask.status = 'done'
-          setWorkerStatus(taskQueue.length > 0 ? `⏳ ${taskQueue.length} queued` : '✅ Done')
+          setWorkerStatus(Scheduler.isIdle() ? '✅ Done' : `⏳ ${Scheduler.getState().pending.length} queued`)
           steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
           WindowManager.updateTask(task)
           reportTaskResult(taskDescription, result.summary || '', task.log)
@@ -912,7 +895,6 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         WindowManager.updateTask(task)
       }
     }
-    workerAbort = null
   }
 
   // --- Proactive Agent Loop ---
@@ -941,7 +923,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
       // Don't be too chatty (min 60s between proactive messages)
       if (Date.now() - lastProactive < 60000) return
       // Don't interrupt active work
-      if (workerRunning) {
+      if (!Scheduler.isIdle()) {
         // But DO notify on task completion
         return
       }
@@ -1024,10 +1006,15 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
         {
           system: `You are Fluid Agent. You just finished a background task. Report the results back to the user in the conversation. Be natural — like a friend saying "hey, done with that thing you asked for, here's what I found/did". Keep it concise. Include the key results/findings.`,
           stream: true,
-          onToken: (token) => {
-            fullReply += token
-            bubble.textContent = cleanReply(fullReply)
-            bubble.parentElement.scrollTop = bubble.parentElement.scrollHeight
+          emit: (type, data) => {
+            if (type === 'token') {
+              const token = typeof data === 'string' ? data : (data?.text || '')
+              if (token) {
+                fullReply += token
+                bubble.textContent = cleanReply(fullReply)
+                bubble.parentElement.scrollTop = bubble.parentElement.scrollHeight
+              }
+            }
           },
         }
       )
@@ -1056,5 +1043,8 @@ Be selective. Don't speak just to speak. Quality > frequency.`,
     setTimeout(() => setWorkerStatus(''), 3000)
   }
 
-  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getTaskQueue: () => taskQueue, renderBubbleContent }
+  // Wire Scheduler to startWorker
+  Scheduler._onStart = (entry, slotIndex, abort) => startWorker(entry.task, entry.steps, abort)
+
+  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getScheduler: () => Scheduler, renderBubbleContent, _messages: messages }
 })() 
