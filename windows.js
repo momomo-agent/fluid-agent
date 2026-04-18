@@ -746,8 +746,8 @@ const WindowManager = (() => {
   // Standard window sizes
   const SIZE = {
     small:  { width: 420, height: 360 },
-    medium: { width: 560, height: 400 },
-    large:  { width: 640, height: 460 },
+    medium: { width: 600, height: 460 },
+    large:  { width: 780, height: 520 },
   }
 
   function openFinder(path) {
@@ -1334,7 +1334,7 @@ const WindowManager = (() => {
 
   // --- Video Player ---
   function openVideo(url, title) {
-    const id = create({ type: 'video', title: title || 'Video Player', ...SIZE.medium, data: { url: url || '' } })
+    const id = create({ type: 'video', title: title || 'Video Player', ...SIZE.large, data: { url: url || '' } })
     return id
   }
 
@@ -1377,7 +1377,7 @@ const WindowManager = (() => {
 
   // --- Browser ---
   function openBrowser(url) {
-    const id = create({ type: 'browser', title: 'Browser', ...SIZE.large, data: { url: url || '' } })
+    const id = create({ type: 'browser', title: 'Browser', width: 900, height: 580, data: { url: url || '' } })
     return id
   }
 
@@ -1436,7 +1436,7 @@ const WindowManager = (() => {
 
   function openMap(lat, lng, zoom) {
     if (mapId && windows.has(mapId)) { focus(mapId); return mapId }
-    mapId = create({ type: 'map', title: 'Map', ...SIZE.medium, data: { lat: lat || 39.9042, lng: lng || 116.4074, zoom: zoom || 12, markers: [], route: null } })
+    mapId = create({ type: 'map', title: 'Map', ...SIZE.large, data: { lat: lat || 39.9042, lng: lng || 116.4074, zoom: zoom || 12, markers: [], route: null } })
     updateDock()
     return mapId
   }
