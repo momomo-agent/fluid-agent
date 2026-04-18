@@ -353,19 +353,21 @@ const Agent = (() => {
       const action = actions?.[0]
       if (action?.action === 'execute' || action?.action === 'redirect') {
         renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
-        // Route through Dispatcher for scheduling decision
+        // Route through Dispatcher asynchronously — don't block Talker response
         if (typeof Dispatcher !== 'undefined') {
-          const decision = await Dispatcher.handleIntent(action)
-          if (decision.action === 'new') {
-            enqueueTask(decision.task || action.task || userMessage, decision.steps || action.steps, decision.priority ?? action.priority ?? 1)
-          } else if (decision.action === 'steer' && decision.workerId) {
-            Dispatcher.pushIntent({ action: 'steer', instruction: decision.instruction })
-            showActivity(`↪ Steering #${decision.workerId}: ${(decision.instruction || '').slice(0, 40)}`)
-          } else if (decision.action === 'abort') {
-            Scheduler.abort(decision.workerId || null)
-            setWorkerStatus('')
-            showActivity('Tasks cleared')
-          }
+          const _action = action, _userMessage = userMessage  // capture for closure
+          Dispatcher.handleIntent(_action).then(decision => {
+            if (decision.action === 'new') {
+              enqueueTask(decision.task || _action.task || _userMessage, decision.steps || _action.steps, decision.priority ?? _action.priority ?? 1)
+            } else if (decision.action === 'steer' && decision.workerId) {
+              Dispatcher.pushIntent({ action: 'steer', instruction: decision.instruction })
+              showActivity(`↪ Steering #${decision.workerId}: ${(decision.instruction || '').slice(0, 40)}`)
+            } else if (decision.action === 'abort') {
+              Scheduler.abort(decision.workerId || null)
+              setWorkerStatus('')
+              showActivity('Tasks cleared')
+            }
+          }).catch(err => console.error('[Dispatcher] async decision error:', err.message))
         } else {
           enqueueTask(action.task || userMessage, action.steps, action.priority ?? 1)
         }
