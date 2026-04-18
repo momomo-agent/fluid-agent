@@ -959,8 +959,11 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         const turn = await ai.step(workerMessages, {
           tools,
           system: workerSystem,
-          stream: false,
+          stream: true,
           signal: abort.signal,
+          emit: (type, data) => {
+            if (type === 'token' && data.text) showActivity(`✍️ ${data.text.slice(-30)}`)
+          },
         })
 
         workerMessages = turn.messages
