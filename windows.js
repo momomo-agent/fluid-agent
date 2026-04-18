@@ -913,16 +913,64 @@ const WindowManager = (() => {
   let settingsId = null
   function openSettings() {
     if (settingsId && windows.has(settingsId)) { focus(settingsId); return settingsId }
-    settingsId = create({ type: 'settings', title: 'Settings', ...SIZE.small })
+    settingsId = create({ type: 'settings', title: 'Settings', width: 600, height: 460 })
     return settingsId
   }
 
-  function renderSettings(w, body) {
+  function renderSettings(w, body, activeTab) {
     const store = window._store
+    const tab = activeTab || w._settingsTab || 'general'
+    w._settingsTab = tab
     const savedP = store ? store.get('settings') : Promise.resolve(null)
     savedP.then(saved => {
     saved = saved || {}
-    body.innerHTML = `<div class="settings-body">
+
+    // --- Sidebar + Content layout ---
+    const skills = Agent.getSkills ? Agent.getSkills() : []
+    const apps = WindowManager.getInstalledApps()
+
+    const sidebarHTML = `
+      <div class="settings-sidebar">
+        <div class="settings-nav ${tab === 'general' ? 'active' : ''}" data-tab="general">General</div>
+        <div class="settings-nav ${tab === 'skills' ? 'active' : ''}" data-tab="skills">Skills</div>
+        <div class="settings-nav ${tab === 'apps' ? 'active' : ''}" data-tab="apps">Apps</div>
+        <div class="settings-nav ${tab === 'about' ? 'active' : ''}" data-tab="about">About</div>
+      </div>`
+
+    let contentHTML = ''
+
+    if (tab === 'skills') {
+      contentHTML = `<div class="settings-panel">
+        <div class="settings-group-title">Installed Skills</div>
+        ${skills.length ? skills.map(s => `
+          <div class="settings-skill-item">
+            <span class="settings-skill-name">${s.icon || '🧩'} ${s.name}</span>
+            <span class="settings-skill-desc">${s.description || ''}</span>
+            <button class="settings-skill-del" data-skill="${s.name}" title="Delete">✕</button>
+          </div>`).join('') : '<div class="settings-empty">No skills installed. The agent can create skills during tasks.</div>'}
+      </div>`
+    } else if (tab === 'apps') {
+      contentHTML = `<div class="settings-panel">
+        <div class="settings-group-title">Installed Apps</div>
+        ${apps.length ? apps.map(a => `
+          <div class="settings-skill-item">
+            <span class="settings-skill-name">${a.icon || '💻'} ${a.name}</span>
+            <span class="settings-skill-desc">${a.description || ''}</span>
+            <button class="settings-skill-del" data-app="${a.name}" title="Uninstall">✕</button>
+          </div>`).join('') : '<div class="settings-empty">No apps installed. Ask the agent to create one!</div>'}
+      </div>`
+    } else if (tab === 'about') {
+      contentHTML = `<div class="settings-panel">
+        <div class="settings-group-title">Fluid Agent OS</div>
+        <div class="settings-about-text">
+          <p>A conversational AI that controls an entire desktop environment.</p>
+          <p style="margin-top:8px;color:var(--text-muted)">Architecture: Talker → Dispatcher → Worker</p>
+          <p style="color:var(--text-muted)">Version: 0.2.0</p>
+        </div>
+      </div>`
+    } else {
+      // General tab
+      contentHTML = `<div class="settings-panel">
       <div class="settings-group-title">LLM</div>
       <div class="settings-section">
         <div class="settings-label">Provider</div>
@@ -964,10 +1012,10 @@ const WindowManager = (() => {
       <div class="settings-group-title">Voice</div>
       <div class="settings-section">
         <label class="settings-toggle"><input type="checkbox" id="s-voice" ${saved.voice ? 'checked' : ''}> Enable voice (Web Speech API free, or ElevenLabs premium)</label>
-        <div class="settings-hint">Without API key: uses browser's built-in speech recognition. Hold mic button = push-to-talk.</div>
+        <div class="settings-hint">Without API key: uses browser built-in speech. Hold mic = push-to-talk.</div>
       </div>
       <div class="settings-section">
-        <div class="settings-label">ElevenLabs API Key (optional, for premium voice)</div>
+        <div class="settings-label">ElevenLabs API Key (optional)</div>
         <input class="settings-input" id="s-elkey" type="text" placeholder="sk_..." value="${saved.elevenLabsKey || ''}">
       </div>
       <div class="settings-section">
@@ -979,104 +1027,104 @@ const WindowManager = (() => {
       </div>
       <button class="settings-save" id="s-save">Save & Apply</button>
     </div>`
-
-    // --- ElevenLabs voice picker ---
-    const elKeyInput = body.querySelector('#s-elkey')
-    const elVoiceSelect = body.querySelector('#s-elvoice')
-    const elPreview = body.querySelector('#s-elvoice-preview')
-    let voicesCache = null
-
-    async function loadVoices(apiKey) {
-      if (!apiKey) {
-        elVoiceSelect.innerHTML = '<option value="">Enter API key to load voices...</option>'
-        elPreview.innerHTML = ''
-        return
-      }
-      elVoiceSelect.innerHTML = '<option value="">Loading voices...</option>'
-      try {
-        const res = await fetch('https://api.elevenlabs.io/v1/voices', {
-          headers: { 'xi-api-key': apiKey }
-        })
-        if (!res.ok) throw new Error(res.status)
-        const data = await res.json()
-        voicesCache = data.voices || []
-        elVoiceSelect.innerHTML = voicesCache.map(v => {
-          const labels = v.labels ? Object.values(v.labels).filter(Boolean).join(', ') : ''
-          return `<option value="${v.voice_id}" ${v.voice_id === (saved.elevenLabsVoice || '') ? 'selected' : ''}>${v.name}${labels ? ' — ' + labels : ''}</option>`
-        }).join('')
-        if (!voicesCache.length) elVoiceSelect.innerHTML = '<option value="">No voices found</option>'
-        updatePreview()
-      } catch (e) {
-        elVoiceSelect.innerHTML = '<option value="">Failed to load voices</option>'
-        elPreview.innerHTML = ''
-      }
     }
 
-    function updatePreview() {
-      const id = elVoiceSelect.value
-      const voice = voicesCache?.find(v => v.voice_id === id)
-      if (voice) {
-        const labels = voice.labels ? Object.entries(voice.labels).map(([k,v]) => `${k}: ${v}`).join(' · ') : ''
-        elPreview.innerHTML = `<span style="font-size:12px;color:var(--text-muted)">${labels || voice.category || ''}</span> <button class="voice-preview-btn" title="Preview voice">▶ Preview</button>`
-        elPreview.querySelector('.voice-preview-btn')?.addEventListener('click', () => {
-          const apiKey = elKeyInput.value.trim()
-          if (!apiKey || !id) return
-          const btn = elPreview.querySelector('.voice-preview-btn')
-          btn.textContent = '⏳'
-          btn.disabled = true
-          fetch('https://api.elevenlabs.io/v1/text-to-speech/' + id, {
-            method: 'POST',
-            headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: "Hello, I'm your assistant.", model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.5, similarity_boost: 0.75 } })
-          })
-          .then(r => { if (!r.ok) throw new Error(r.status); return r.blob() })
-          .then(blob => {
-            const url = URL.createObjectURL(blob)
-            const audio = new Audio(url)
-            audio.play()
-            audio.onended = () => URL.revokeObjectURL(url)
-            btn.textContent = '▶ Preview'
-            btn.disabled = false
-          })
-          .catch(() => {
-            btn.textContent = '▶ Preview'
-            btn.disabled = false
-          })
-        })
-      } else elPreview.innerHTML = ''
-    }
+    body.innerHTML = `<div class="settings-layout">${sidebarHTML}<div class="settings-content">${contentHTML}</div></div>`
 
-    elVoiceSelect.addEventListener('change', updatePreview)
-    // Debounced key input → reload voices
-    let keyTimer = null
-    elKeyInput.addEventListener('input', () => {
-      clearTimeout(keyTimer)
-      keyTimer = setTimeout(() => loadVoices(elKeyInput.value.trim()), 600)
+    // --- Tab navigation ---
+    body.querySelectorAll('.settings-nav').forEach(el => {
+      el.addEventListener('click', () => renderSettings(w, body, el.dataset.tab))
     })
-    // Load on open if key exists
-    if (saved.elevenLabsKey) loadVoices(saved.elevenLabsKey)
 
-    body.querySelector('#s-save').addEventListener('click', async () => {
-      const settings = {
-        provider: body.querySelector('#s-provider').value,
-        apiKey: body.querySelector('#s-apikey').value,
-        model: body.querySelector('#s-model').value,
-        baseUrl: body.querySelector('#s-baseurl').value,
-        useProxy: body.querySelector('#s-proxy').checked,
-        voice: body.querySelector('#s-voice').checked,
-        tavilyKey: body.querySelector('#s-tavily').value,
-        tmdbKey: body.querySelector('#s-tmdb').value,
-        elevenLabsKey: body.querySelector('#s-elkey').value,
-        elevenLabsVoice: body.querySelector('#s-elvoice').value,
+    // --- Skills tab: delete ---
+    body.querySelectorAll('.settings-skill-del[data-skill]').forEach(el => {
+      el.addEventListener('click', () => {
+        if (Agent.deleteSkill) Agent.deleteSkill(el.dataset.skill)
+        renderSettings(w, body, 'skills')
+      })
+    })
+
+    // --- Apps tab: uninstall ---
+    body.querySelectorAll('.settings-skill-del[data-app]').forEach(el => {
+      el.addEventListener('click', () => {
+        WindowManager.uninstallApp(el.dataset.app)
+        renderSettings(w, body, 'apps')
+      })
+    })
+
+    // --- General tab: ElevenLabs voice picker + save ---
+    if (tab === 'general') {
+      const elKeyInput = body.querySelector('#s-elkey')
+      const elVoiceSelect = body.querySelector('#s-elvoice')
+      const elPreview = body.querySelector('#s-elvoice-preview')
+      let voicesCache = null
+
+      async function loadVoices(apiKey) {
+        if (!apiKey) { elVoiceSelect.innerHTML = '<option value="">Enter API key to load voices...</option>'; elPreview.innerHTML = ''; return }
+        elVoiceSelect.innerHTML = '<option value="">Loading voices...</option>'
+        try {
+          const res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': apiKey } })
+          if (!res.ok) throw new Error(res.status)
+          const data = await res.json()
+          voicesCache = data.voices || []
+          elVoiceSelect.innerHTML = voicesCache.map(v => {
+            const labels = v.labels ? Object.values(v.labels).filter(Boolean).join(', ') : ''
+            return `<option value="${v.voice_id}" ${v.voice_id === (saved.elevenLabsVoice || '') ? 'selected' : ''}>${v.name}${labels ? ' \u2014 ' + labels : ''}</option>`
+          }).join('')
+          if (!voicesCache.length) elVoiceSelect.innerHTML = '<option value="">No voices found</option>'
+          updatePreview()
+        } catch (e) { elVoiceSelect.innerHTML = '<option value="">Failed to load voices</option>'; elPreview.innerHTML = '' }
       }
-      if (store) await store.set('settings', settings)
-      window._settingsCache = settings
-      Agent.configure(settings.provider, settings.apiKey, settings.model, settings.baseUrl, store)
-      if (settings.voice) Voice?.enable()
-      else Voice?.disable()
-      Agent.startProactiveLoop()
-      showActivity('Settings saved')
-    })
+
+      function updatePreview() {
+        const id = elVoiceSelect.value
+        const voice = voicesCache?.find(v => v.voice_id === id)
+        if (voice) {
+          const labels = voice.labels ? Object.entries(voice.labels).map(([k,v]) => `${k}: ${v}`).join(' \u00b7 ') : ''
+          elPreview.innerHTML = `<span style="font-size:12px;color:var(--text-muted)">${labels || voice.category || ''}</span> <button class="voice-preview-btn" title="Preview voice">\u25b6 Preview</button>`
+          elPreview.querySelector('.voice-preview-btn')?.addEventListener('click', () => {
+            const apiKey = elKeyInput.value.trim()
+            if (!apiKey || !id) return
+            const btn = elPreview.querySelector('.voice-preview-btn')
+            btn.textContent = '\u23f3'; btn.disabled = true
+            fetch('https://api.elevenlabs.io/v1/text-to-speech/' + id, {
+              method: 'POST', headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: "Hello, I'm your assistant.", model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.5, similarity_boost: 0.75 } })
+            })
+            .then(r => { if (!r.ok) throw new Error(r.status); return r.blob() })
+            .then(blob => { const url = URL.createObjectURL(blob); const audio = new Audio(url); audio.play(); audio.onended = () => URL.revokeObjectURL(url); btn.textContent = '\u25b6 Preview'; btn.disabled = false })
+            .catch(() => { btn.textContent = '\u25b6 Preview'; btn.disabled = false })
+          })
+        } else elPreview.innerHTML = ''
+      }
+
+      elVoiceSelect.addEventListener('change', updatePreview)
+      let keyTimer = null
+      elKeyInput.addEventListener('input', () => { clearTimeout(keyTimer); keyTimer = setTimeout(() => loadVoices(elKeyInput.value.trim()), 600) })
+      if (saved.elevenLabsKey) loadVoices(saved.elevenLabsKey)
+
+      body.querySelector('#s-save').addEventListener('click', async () => {
+        const settings = {
+          provider: body.querySelector('#s-provider').value,
+          apiKey: body.querySelector('#s-apikey').value,
+          model: body.querySelector('#s-model').value,
+          baseUrl: body.querySelector('#s-baseurl').value,
+          useProxy: body.querySelector('#s-proxy').checked,
+          voice: body.querySelector('#s-voice').checked,
+          tavilyKey: body.querySelector('#s-tavily').value,
+          tmdbKey: body.querySelector('#s-tmdb').value,
+          elevenLabsKey: body.querySelector('#s-elkey').value,
+          elevenLabsVoice: body.querySelector('#s-elvoice').value,
+        }
+        if (store) await store.set('settings', settings)
+        window._settingsCache = settings
+        Agent.configure(settings.provider, settings.apiKey, settings.model, settings.baseUrl, store)
+        if (settings.voice) Voice?.enable()
+        else Voice?.disable()
+        Agent.startProactiveLoop()
+        showActivity('Settings saved')
+      })
+    }
     })
   }
 
