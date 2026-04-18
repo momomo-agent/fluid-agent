@@ -1467,7 +1467,7 @@ const WindowManager = (() => {
     const url = w.data?.url || ''
     const displayUrl = w.data?.displayUrl || url || 'about:blank'
     // Proxy external URLs to strip X-Frame-Options/CSP headers
-    const proxyUrl = url ? `https://proxy.link2web.site/raw?url=${encodeURIComponent(url)}` : ''
+    const proxyUrl = url ? `https://proxy.link2web.site/frame?url=${encodeURIComponent(url)}` : ''
 
     body.innerHTML = `<div class="browser-window">
       <div class="browser-toolbar">
