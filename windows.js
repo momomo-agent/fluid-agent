@@ -305,11 +305,12 @@ const WindowManager = (() => {
       w.el.style.top = w._restore.top
       w.el.style.width = w._restore.width
       w.el.style.height = w._restore.height
+      w._norm = w._restore.norm
       w.el.classList.remove('fullscreen')
       w.fullscreen = false
     } else {
       // Save and go fullscreen
-      w._restore = { left: w.el.style.left, top: w.el.style.top, width: w.el.style.width, height: w.el.style.height }
+      w._restore = { left: w.el.style.left, top: w.el.style.top, width: w.el.style.width, height: w.el.style.height, norm: w._norm }
       const a = area()
       w.el.style.left = '0px'
       w.el.style.top = '0px'
