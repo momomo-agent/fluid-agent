@@ -39,6 +39,7 @@
     // Init persistence — store is independent of AI
     await VFS.init(store)
     await WindowManager.loadApps(store)
+    await Scheduler.restore(store)
     if (hasKey) await Agent.loadSkills()
 
     document.getElementById('app').style.display = 'flex'

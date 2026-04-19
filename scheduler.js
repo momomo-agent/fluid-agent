@@ -1,10 +1,13 @@
-/* scheduler.js — Task scheduler with parallel slots, fast lane, and preemption */
+/* scheduler.js — Task scheduler with parallel slots, retry, persistence, and preemption */
 const Scheduler = (() => {
   const MAX_SLOTS = 3
+  const MAX_RETRIES = 2
+  const RETRY_BASE_MS = 1000  // exponential backoff: 1s, 2s, 4s
   let nextTaskId = 1
-  const pending = []       // { id, task, steps, priority, dependsOn, status:'pending' }
+  const pending = []       // { id, task, steps, priority, dependsOn, status:'pending', retryCount:0 }
   const slots = new Map()  // slotIndex → { id, task, steps, priority, abort, status:'running' }
   const completed = []     // last N completed tasks
+  let _store = null        // agentic-store for persistence
 
   // --- Task lifecycle ---
 
@@ -81,7 +84,20 @@ const Scheduler = (() => {
         if (err.message === 'aborted' || abort.signal.aborted) {
           finishSlot(slotIndex, 'aborted')
         } else {
-          finishSlot(slotIndex, 'error', err.message)
+          // Retry with exponential backoff
+          const retries = entry.retryCount || 0
+          if (retries < MAX_RETRIES) {
+            entry.retryCount = retries + 1
+            entry.status = 'pending'
+            const delay = RETRY_BASE_MS * Math.pow(2, retries)
+            console.log(`[Scheduler] Task ${entry.id} failed (${err.message}), retry ${entry.retryCount}/${MAX_RETRIES} in ${delay}ms`)
+            EventBus.emit('scheduler.retry', { id: entry.id, retry: entry.retryCount, delay, error: err.message })
+            slots.delete(slotIndex)
+            setTimeout(() => { pending.unshift(entry); schedule() }, delay)
+          } else {
+            console.log(`[Scheduler] Task ${entry.id} failed after ${MAX_RETRIES} retries: ${err.message}`)
+            finishSlot(slotIndex, 'error', err.message)
+          }
         }
       })
     }
@@ -168,6 +184,44 @@ const Scheduler = (() => {
     return slots.size === 0 && pending.length === 0
   }
 
+  // --- Persistence ---
+  async function save() {
+    if (!_store) return
+    await _store.set('scheduler', {
+      nextTaskId,
+      pending: pending.map(t => ({ id: t.id, task: t.task, steps: t.steps, priority: t.priority, dependsOn: t.dependsOn, status: t.status, retryCount: t.retryCount || 0 })),
+      completed: completed.slice(-10).map(t => ({ id: t.id, task: t.task, status: t.status })),
+    })
+  }
+
+  async function restore(store) {
+    _store = store
+    if (!_store) return false
+    const data = await _store.get('scheduler')
+    if (!data) return false
+    nextTaskId = data.nextTaskId || 1
+    if (data.completed) completed.push(...data.completed)
+    // Re-enqueue pending tasks that were interrupted
+    if (data.pending) {
+      for (const t of data.pending) {
+        if (t.status === 'pending' || t.status === 'running') {
+          t.status = 'pending'
+          pending.push(t)
+        }
+      }
+      if (pending.length > 0) {
+        console.log(`[Scheduler] Restored ${pending.length} pending tasks`)
+        schedule()
+      }
+    }
+    return true
+  }
+
+  // Auto-save on state changes
+  EventBus.on('scheduler.enqueued', () => save())
+  EventBus.on('scheduler.finished', () => save())
+  EventBus.on('scheduler.retry', () => save())
+
   // _onStart is set by agent.js to provide the actual worker execution
-  return { enqueue, steer, abort, getState, isIdle, schedule, _onStart: null, MAX_SLOTS }
+  return { enqueue, steer, abort, getState, isIdle, schedule, save, restore, _onStart: null, MAX_SLOTS }
 })()

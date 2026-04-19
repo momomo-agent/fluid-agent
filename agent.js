@@ -140,12 +140,11 @@ const Agent = (() => {
 
   function configure(provider, apiKey, model, baseUrl, storeInstance) {
     const opts = { provider, apiKey }
-    // Use proxy if enabled in settings, or auto-detect for first-party APIs
+    // Use CORS proxy for external APIs (browser can't call them directly)
     const settings = window._settingsCache || {}
-    if (settings.useProxy) {
-      opts.proxyUrl = 'https://proxy.link2web.site'
-    } else if (!baseUrl || !baseUrl.includes('localhost')) {
-      // Browser can't call external APIs directly (CORS), always proxy
+    if (baseUrl && baseUrl.includes('localhost')) {
+      // Local API, no proxy needed
+    } else {
       opts.proxyUrl = 'https://proxy.link2web.site'
     }
     if (storeInstance) opts.store = { instance: storeInstance }

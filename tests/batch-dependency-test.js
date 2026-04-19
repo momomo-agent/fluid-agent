@@ -277,6 +277,48 @@ console.log('\n📋 Test 8: Dependency on non-existent task (should not block)')
   Scheduler.abort(null)
 }
 
+console.log('\n📋 Test 9: Error retry with exponential backoff')
+{
+  Scheduler.abort(null)
+  EventBus._h = {}
+  const retryEvents = []
+  EventBus.on('scheduler.retry', e => retryEvents.push(e))
+  EventBus.on('scheduler.finished', e => retryEvents.push({ finished: true, ...e }))
+
+  let callCount = 0
+  Scheduler._onStart = async (entry) => {
+    callCount++
+    if (callCount <= 2) throw new Error('transient failure')
+    // 3rd attempt succeeds
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  const id = Scheduler.enqueue('Flaky task', [], 1, [])
+  // Wait for retries (1s + 2s backoff, but we use shorter for test)
+  await new Promise(r => setTimeout(r, 5000))
+
+  assert(callCount === 3, `Called 3 times (2 retries + 1 success), got ${callCount}`)
+  assert(retryEvents.some(e => e.retry === 1), 'First retry event emitted')
+  assert(retryEvents.some(e => e.retry === 2), 'Second retry event emitted')
+  assert(retryEvents.some(e => e.finished && e.status === 'done'), 'Eventually succeeded')
+}
+
+console.log('\n📋 Test 10: Max retries exhausted → error')
+{
+  Scheduler.abort(null)
+  EventBus._h = {}
+  const events = []
+  EventBus.on('scheduler.finished', e => events.push(e))
+
+  Scheduler._onStart = async () => { throw new Error('permanent failure') }
+
+  const id = Scheduler.enqueue('Doomed task', [], 1, [])
+  await new Promise(r => setTimeout(r, 8000))
+
+  assert(events.length === 1, `Finished once (got ${events.length})`)
+  assert(events[0]?.status === 'error', `Status is error (got ${events[0]?.status})`)
+}
+
 // --- Summary ---
 console.log(`\n${'='.repeat(40)}`)
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`)
