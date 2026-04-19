@@ -323,6 +323,71 @@ const Agent = (() => {
 
     try {
       const os = getOsState()
+
+      // --- Unified dispatch function (used by both streaming and post-parse) ---
+      function _dispatchAction(action, userMsg) {
+        if (action.action === 'execute' || action.action === 'redirect') {
+          if (typeof Dispatcher !== 'undefined') {
+            Dispatcher.handleIntent(action).then(decision => {
+              if (decision.action === 'new') {
+                enqueueTask(decision.task || action.task || userMsg, decision.steps || action.steps, decision.priority ?? action.priority ?? 1)
+              } else if (decision.action === 'steer' && decision.workerId) {
+                Dispatcher.pushIntent({ action: 'steer', instruction: decision.instruction })
+                showActivity(`↪ Steering #${decision.workerId}: ${(decision.instruction || '').slice(0, 40)}`)
+              } else if (decision.action === 'abort') {
+                Scheduler.abort(decision.workerId || null)
+                setWorkerStatus('')
+                showActivity('Tasks cleared')
+              }
+            }).catch(err => console.error('[Dispatcher] error:', err.message))
+          } else {
+            enqueueTask(action.task || userMsg, action.steps, action.priority ?? 1)
+          }
+        } else if (action.action === 'steer') {
+          if (typeof Dispatcher !== 'undefined') {
+            Dispatcher.pushIntent({ action: 'steer', instruction: action.instruction })
+          } else {
+            blackboard.directive = { type: 'steer', instruction: action.instruction }
+          }
+          showActivity(`↪ Steering: ${action.instruction?.slice(0, 40)}`)
+        } else if (action.action === 'abort') {
+          Scheduler.abort(null)
+          setWorkerStatus('')
+          showActivity('Tasks cleared')
+        } else if (action.action === 'remember' && action.memory) {
+          const memPath = '/system/memory/MEMORY.md'
+          let mem = VFS.isFile(memPath) ? VFS.readFile(memPath) : '# Agent Memory\n'
+          const section = action.section || 'Lessons Learned'
+          const sectionHeader = `## ${section}`
+          if (mem.includes(sectionHeader)) {
+            mem = mem.replace(sectionHeader, `${sectionHeader}\n- ${action.memory}`)
+          } else {
+            mem += `\n${sectionHeader}\n- ${action.memory}\n`
+          }
+          VFS.writeFile(memPath, mem)
+          showActivity('Memory updated')
+        }
+      }
+
+      // --- Streaming Dispatch: fire actions as soon as JSON is detected ---
+      let _streamDispatched = false
+      let _streamAction = null
+
+      function _tryStreamDispatch(text) {
+        if (_streamDispatched) return
+        // Look for a complete ```json {...} ``` block in the accumulated text
+        const match = text.match(/```json\s*(\{[\s\S]*?\})\s*```/)
+        if (!match) return
+        try {
+          const action = JSON.parse(match[1])
+          if (!action.action) return
+          _streamDispatched = true
+          _streamAction = action
+          // Fire immediately — don't wait for streaming to finish
+          _dispatchAction(action, userMessage)
+        } catch {}
+      }
+
       const result = await ai.think(userMessage, {
         system: buildTalkerSystem(os),
         stream: true,
@@ -336,6 +401,8 @@ const Agent = (() => {
               // Strip JSON action blocks during streaming so user doesn't see raw JSON
               bubble.textContent = cleanReply(fullReply)
               document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight
+              // Attempt streaming dispatch on every token
+              _tryStreamDispatch(fullReply)
             }
           }
         }
@@ -352,67 +419,19 @@ const Agent = (() => {
       messages.push({ role: 'assistant', content: fullReply })
       saveChat()
 
-      const actions = parseAction(fullReply)
-      const action = actions?.[0]
-      if (action?.action === 'execute' || action?.action === 'redirect') {
-        renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
-        // Route through Dispatcher asynchronously — don't block Talker response
-        if (typeof Dispatcher !== 'undefined') {
-          const _action = action, _userMessage = userMessage  // capture for closure
-          Dispatcher.handleIntent(_action).then(decision => {
-            if (decision.action === 'new') {
-              enqueueTask(decision.task || _action.task || _userMessage, decision.steps || _action.steps, decision.priority ?? _action.priority ?? 1)
-            } else if (decision.action === 'steer' && decision.workerId) {
-              Dispatcher.pushIntent({ action: 'steer', instruction: decision.instruction })
-              showActivity(`↪ Steering #${decision.workerId}: ${(decision.instruction || '').slice(0, 40)}`)
-            } else if (decision.action === 'abort') {
-              Scheduler.abort(decision.workerId || null)
-              setWorkerStatus('')
-              showActivity('Tasks cleared')
-            }
-          }).catch(err => console.error('[Dispatcher] async decision error:', err.message))
-        } else {
-          enqueueTask(action.task || userMessage, action.steps, action.priority ?? 1)
-        }
-      } else if (action?.action === 'steer') {
-        renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
-        if (typeof Dispatcher !== 'undefined') {
-          Dispatcher.pushIntent({ action: 'steer', instruction: action.instruction })
-        } else {
-          blackboard.directive = { type: 'steer', instruction: action.instruction }
-        }
-        showActivity(`↪ Steering: ${action.instruction?.slice(0, 40)}`)
-      } else if (action?.action === 'abort') {
-        renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
-        Scheduler.abort(null)
-        setWorkerStatus('')
-        showActivity('Tasks cleared')
-        // Process follow-up actions (e.g., abort then execute)
-        for (let i = 1; i < (actions || []).length; i++) {
-          const followUp = actions[i]
-          if (followUp?.action === 'execute') {
-            enqueueTask(followUp.task || userMessage, followUp.steps, followUp.priority ?? 1)
-          }
-        }
-      } else if (action?.action === 'remember') {
-        renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
-        // Write to agent memory in VFS
-        if (action.memory) {
-          const memPath = '/system/memory/MEMORY.md'
-          let mem = VFS.isFile(memPath) ? VFS.readFile(memPath) : '# Agent Memory\n'
-          const section = action.section || 'Lessons Learned'
-          const sectionHeader = `## ${section}`
-          if (mem.includes(sectionHeader)) {
-            mem = mem.replace(sectionHeader, `${sectionHeader}\n- ${action.memory}`)
-          } else {
-            mem += `\n${sectionHeader}\n- ${action.memory}\n`
-          }
-          VFS.writeFile(memPath, mem)
-          showActivity('Memory updated')
-        }
+      // If already dispatched during streaming, just update bubble text
+      if (_streamDispatched) {
+        renderBubbleContent(bubble, _streamAction?.reply || cleanReply(fullReply))
       } else {
-        // No action parsed — do final media render pass on the raw reply
-        renderBubbleContent(bubble, cleanReply(fullReply))
+        // Post-stream parse: fallback for non-streaming or missed detection
+        const actions = parseAction(fullReply)
+        const action = actions?.[0]
+        if (action) {
+          _dispatchAction(action, userMessage)
+          renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
+        } else {
+          renderBubbleContent(bubble, cleanReply(fullReply))
+        }
       }
     } catch (err) {
       if (!fullReply) bubble.textContent = `Error: ${err.message}`
