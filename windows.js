@@ -843,8 +843,9 @@ const WindowManager = (() => {
     return taskManagerId
   }
 
+  let _taskSeq = 0
   function addTask(goal, steps) {
-    const task = { id: 'task-' + Date.now(), goal, steps: steps.map(s => ({ text: s, status: 'pending' })), status: 'running', log: [], startTime: Date.now() }
+    const task = { id: 'task-' + Date.now() + '-' + (++_taskSeq), goal, steps: steps.map(s => ({ text: s, status: 'pending' })), status: 'running', log: [], startTime: Date.now() }
     taskHistory.unshift(task)
     if (taskHistory.length > 20) taskHistory.pop()
     openTaskManager()
@@ -865,26 +866,32 @@ const WindowManager = (() => {
     const sel = selectedId || taskHistory[0]?.id
     const selected = taskHistory.find(t => t.id === sel) || taskHistory[0]
 
-    // Queue overview from Dispatcher
+    // Queue overview from Dispatcher + Scheduler
     const ds = typeof Dispatcher !== 'undefined' ? Dispatcher.getState() : { running: [], pending: [] }
+    const ss = typeof Scheduler !== 'undefined' ? Scheduler.getState() : { running: [], pending: [], completed: [], freeSlots: 3 }
 
     body.innerHTML = `<div class="tm-layout">
       <div class="tm-tabs">
         <button class="tm-tab ${currentView === 'detail' ? 'active' : ''}" data-view="detail">Tasks</button>
         <button class="tm-tab ${currentView === 'log' ? 'active' : ''}" data-view="log">Log${selected?.log.length ? ` · ${selected.log.length}` : ''}</button>
-        <button class="tm-tab ${currentView === 'queue' ? 'active' : ''}" data-view="queue">Queue${ds.running.length + ds.pending.length > 0 ? ` · ${ds.running.length + ds.pending.length}` : ''}</button>
+        <button class="tm-tab ${currentView === 'queue' ? 'active' : ''}" data-view="queue">Queue${ds.running.length + ds.pending.length + ss.pending.length > 0 ? ` · ${ds.running.length + ds.pending.length + ss.pending.length}` : ''}</button>
       </div>
       ${currentView === 'queue' ? `
       <div class="tm-queue">
-        ${ds.running.length ? `<div class="tm-queue-section">Running</div>${ds.running.map(r => `<div class="tm-queue-item running"><span>▶</span><span>${r.task.slice(0,50)}</span></div>`).join('')}` : ''}
-        ${ds.pending.length ? `<div class="tm-queue-section">Queued</div>${ds.pending.map(p => `<div class="tm-queue-item pending"><span>${p.priority === 0 ? '⚡' : p.priority === 2 ? '💤' : '○'}</span><span>${p.task.slice(0,50)}</span></div>`).join('')}` : ''}
-        ${!ds.running.length && !ds.pending.length ? '<div class="tm-empty">Queue is empty</div>' : ''}
+        ${ds.running.length ? `<div class="tm-queue-section">Running</div>${ds.running.map(r => `<div class="tm-queue-item running"><span>▶</span><span>${(r.task || '').slice(0,50)}</span></div>`).join('')}` : ''}
+        ${ss.pending.length ? `<div class="tm-queue-section">Waiting (${ss.pending.length})</div>${ss.pending.map(p => `<div class="tm-queue-item pending"><span>${p.priority === 0 ? '⚡' : p.priority === 2 ? '💤' : '○'}</span><span>${(p.task || '').slice(0,50)}</span></div>`).join('')}` : ''}
+        ${ds.pending.length ? `<div class="tm-queue-section">Suspended</div>${ds.pending.map(p => `<div class="tm-queue-item pending"><span>⏸</span><span>${(p.task || '').slice(0,50)}</span></div>`).join('')}` : ''}
+        ${!ds.running.length && !ds.pending.length && !ss.pending.length ? '<div class="tm-empty">Queue is empty</div>' : ''}
       </div>` : currentView === 'log' ? `
       <div class="tm-log-view">
         <div class="tm-log-header">${selected ? selected.goal.slice(0, 50) : 'No task selected'}</div>
         <div class="tm-log-body">${selected?.log.length ? selected.log.map((l, i) => `<div class="tm-log-entry"><span class="tm-log-idx">${i + 1}</span><span class="tm-log-text">${l}</span></div>`).join('') : '<div class="tm-empty">No logs yet</div>'}</div>
       </div>` : `
-      <div class="tm-content"><div class="tm-list">${taskHistory.map(t => `
+      <div class="tm-content"><div class="tm-list">${ss.pending.length ? ss.pending.map(t => `
+        <div class="tm-item pending" data-id="pending-${t.id}">
+          <span class="tm-status-dot"></span>
+          <span class="tm-goal">⏳ ${(t.task || '').slice(0, 36)}${(t.task || '').length > 36 ? '…' : ''}</span>
+        </div>`).join('') : ''}${taskHistory.map(t => `
         <div class="tm-item ${t.status} ${t.id === selected?.id ? 'active' : ''}" data-id="${t.id}">
           <span class="tm-status-dot"></span>
           <span class="tm-goal">${t.goal.slice(0, 40)}${t.goal.length > 40 ? '…' : ''}</span>
@@ -907,6 +914,16 @@ const WindowManager = (() => {
     body.querySelectorAll('.tm-tab').forEach(el => {
       el.addEventListener('click', () => renderTaskManager(sel, el.dataset.view))
     })
+  }
+
+  // Auto-refresh Task Manager on scheduler events
+  if (typeof EventBus !== 'undefined') {
+    const _tmRefresh = () => { if (taskManagerId && windows.has(taskManagerId)) renderTaskManager() }
+    EventBus.on('scheduler.enqueued', _tmRefresh)
+    EventBus.on('scheduler.started', _tmRefresh)
+    EventBus.on('scheduler.finished', _tmRefresh)
+    EventBus.on('scheduler.paused', _tmRefresh)
+    EventBus.on('scheduler.aborted', _tmRefresh)
   }
 
   // Refresh all finder windows when FS changes
