@@ -879,7 +879,7 @@ const WindowManager = (() => {
       ${currentView === 'queue' ? `
       <div class="tm-queue">
         ${ds.running.length ? `<div class="tm-queue-section">Running</div>${ds.running.map(r => `<div class="tm-queue-item running"><span>▶</span><span>${(r.task || '').slice(0,50)}</span></div>`).join('')}` : ''}
-        ${ss.pending.length ? `<div class="tm-queue-section">Waiting (${ss.pending.length})</div>${ss.pending.map(p => `<div class="tm-queue-item pending"><span>${p.priority === 0 ? '⚡' : p.priority === 2 ? '💤' : '○'}</span><span>${(p.task || '').slice(0,50)}</span></div>`).join('')}` : ''}
+        ${ss.pending.length ? `<div class="tm-queue-section">Waiting (${ss.pending.length})</div>${ss.pending.map(p => `<div class="tm-queue-item pending"><span>${p.priority === 0 ? '⚡' : p.priority === 2 ? '💤' : '○'}</span><span>${(p.task || '').slice(0,50)}${p.dependsOn?.length ? ' <span style="opacity:.5;font-size:11px">⏳ waiting for #' + p.dependsOn.join(', #') + '</span>' : ''}</span></div>`).join('')}` : ''}
         ${ds.pending.length ? `<div class="tm-queue-section">Suspended</div>${ds.pending.map(p => `<div class="tm-queue-item pending"><span>⏸</span><span>${(p.task || '').slice(0,50)}</span></div>`).join('')}` : ''}
         ${!ds.running.length && !ds.pending.length && !ss.pending.length ? '<div class="tm-empty">Queue is empty</div>' : ''}
       </div>` : currentView === 'log' ? `

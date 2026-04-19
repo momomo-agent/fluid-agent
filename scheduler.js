@@ -71,7 +71,8 @@ const Scheduler = (() => {
     entry.status = 'running'
     entry.abort = abort
     slots.set(slotIndex, entry)
-    EventBus.emit('scheduler.started', { id: entry.id, slot: slotIndex, task: entry.task })
+    const depInfo = entry.dependsOn?.length ? ` (deps: [${entry.dependsOn}] satisfied)` : ''
+    EventBus.emit('scheduler.started', { id: entry.id, slot: slotIndex, task: entry.task, depInfo })
     // The actual worker execution is handled by the callback
     if (Scheduler._onStart) {
       Scheduler._onStart(entry, slotIndex, abort).then(() => {
