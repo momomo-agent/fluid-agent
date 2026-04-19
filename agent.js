@@ -384,14 +384,21 @@ const Agent = (() => {
         // Look for a complete ```json {...} ``` block in the accumulated text
         const match = text.match(/```json\s*(\{[\s\S]*?\})\s*```/)
         if (!match) return
+        let action
         try {
-          const action = JSON.parse(match[1])
-          if (!action.action) return
-          _streamDispatched = true
-          _streamAction = action
-          // Fire immediately — don't wait for streaming to finish
-          _dispatchAction(action, userMessage)
-        } catch {}
+          action = JSON.parse(match[1])
+        } catch {
+          // Non-greedy failed — try greedy extraction
+          const start = text.indexOf('{', text.indexOf('```json'))
+          const end = text.lastIndexOf('```')
+          if (start >= 0 && end > start) {
+            try { action = JSON.parse(text.slice(start, end).trim()) } catch { return }
+          } else return
+        }
+        if (!action?.action) return
+        _streamDispatched = true
+        _streamAction = action
+        _dispatchAction(action, userMessage)
       }
 
       const result = await ai.think(userMessage, {
@@ -491,11 +498,14 @@ const Agent = (() => {
 
   function cleanReply(text) {
     // Remove complete fenced JSON blocks (```json...```)
-    let cleaned = text.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/g, '')
+    // Use greedy match for the JSON body to handle nested braces
+    let cleaned = text.replace(/```(?:json)?\s*\{[\s\S]*\}\s*```/g, '')
     // Remove incomplete fenced block still streaming (``` opened but not closed)
-    cleaned = cleaned.replace(/```(?:json)?\s*[\s\S]*$/g, '')
-    // Remove bare JSON action objects that leaked through
-    cleaned = cleaned.replace(/\{\s*"action"\s*:[\s\S]*$/g, '')
+    cleaned = cleaned.replace(/```(?:json)?\s*\{[\s\S]*$/g, '')
+    // Remove bare JSON action objects (no fences)
+    cleaned = cleaned.replace(/\{\s*"action"\s*:[\s\S]*\}\s*$/g, '')
+    // Remove any remaining ``` markers
+    cleaned = cleaned.replace(/```/g, '')
     return cleaned.trim()
   }
 
@@ -585,10 +595,27 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
 
   function parseAction(text) {
     const blocks = []
+    // Match fenced JSON blocks — use balanced brace matching instead of regex
     const re = /```json\s*(\{[\s\S]*?\})\s*```/g
     let m
     while ((m = re.exec(text)) !== null) {
-      try { blocks.push(JSON.parse(m[1])) } catch {}
+      try { blocks.push(JSON.parse(m[1])) } catch {
+        // Non-greedy failed (nested braces) — try greedy from this position
+        const start = text.indexOf('{', m.index)
+        if (start >= 0) {
+          const end = text.indexOf('```', start)
+          if (end > start) {
+            try { blocks.push(JSON.parse(text.slice(start, end).trim())) } catch {}
+          }
+        }
+      }
+    }
+    // Also try bare JSON (no fences)
+    if (blocks.length === 0) {
+      const bareMatch = text.match(/\{\s*"action"\s*:[\s\S]*\}/)
+      if (bareMatch) {
+        try { blocks.push(JSON.parse(bareMatch[0])) } catch {}
+      }
     }
     return blocks.length > 0 ? blocks : null
   }
@@ -1417,8 +1444,10 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
       if (!fullReply.trim()) {
         // Fallback: just show the summary
         fullReply = summary || `Done: ${taskDesc}`
-        bubble.textContent = fullReply
       }
+
+      // Final render: clean any leaked JSON
+      renderBubbleContent(bubble, cleanReply(fullReply) || summary || `Done: ${taskDesc}`)
 
       messages.push({ role: 'assistant', content: fullReply })
       saveChat()
