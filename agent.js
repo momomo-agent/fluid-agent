@@ -330,7 +330,7 @@ const Agent = (() => {
           if (typeof Dispatcher !== 'undefined') {
             Dispatcher.handleIntent(action).then(decision => {
               if (decision.action === 'new') {
-                enqueueTask(decision.task || action.task || userMsg, decision.steps || action.steps, decision.priority ?? action.priority ?? 1)
+                enqueueTask(decision.task || action.task || userMsg, decision.steps || action.steps, decision.priority ?? action.priority ?? 1, action.tools || null)
               } else if (decision.action === 'steer' && decision.workerId) {
                 Dispatcher.pushIntent({ action: 'steer', instruction: decision.instruction })
                 showActivity(`↪ Steering #${decision.workerId}: ${(decision.instruction || '').slice(0, 40)}`)
@@ -341,7 +341,7 @@ const Agent = (() => {
               }
             }).catch(err => console.error('[Dispatcher] error:', err.message))
           } else {
-            enqueueTask(action.task || userMsg, action.steps, action.priority ?? 1)
+            enqueueTask(action.task || userMsg, action.steps, action.priority ?? 1, action.tools || null)
           }
         } else if (action.action === 'steer') {
           if (typeof Dispatcher !== 'undefined') {
@@ -556,6 +556,16 @@ Current OS state:
 {"action": "execute", "reply": "your conversational reply", "task": "what to do", "steps": ["step 1", "step 2"], "priority": 1}
 \`\`\`
 
+For SIMPLE, OBVIOUS actions (open app, play/pause music, set wallpaper, etc.), include a "tools" array to skip the Worker LLM entirely:
+\`\`\`json
+{"action": "execute", "reply": "Playing now", "task": "play music", "tools": [{"name": "music", "params": {"action": "play"}}]}
+\`\`\`
+\`\`\`json
+{"action": "execute", "reply": "Here you go", "task": "open finder", "tools": [{"name": "open", "params": {"target": "finder"}}]}
+\`\`\`
+When "tools" is present, the Worker executes them directly without an LLM call — instant response.
+Only use "tools" for single-step, unambiguous operations. For anything complex, omit "tools" and let the Worker figure it out.
+
 2. STEER a running task:
 \`\`\`json
 {"action": "steer", "reply": "your reply", "instruction": "new direction"}
@@ -591,9 +601,9 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
   }
 
   // --- Task scheduling via Scheduler ---
-  function enqueueTask(taskDescription, steps, priority = 1) {
-    console.log(`[enqueueTask] "${taskDescription.slice(0, 60)}" steps=${(steps||[]).length} priority=${priority}`)
-    Scheduler.enqueue(taskDescription, steps, priority, [])
+  function enqueueTask(taskDescription, steps, priority = 1, tools = null) {
+    console.log(`[enqueueTask] "${taskDescription.slice(0, 60)}" steps=${(steps||[]).length} priority=${priority} tools=${tools?.length || 0}`)
+    Scheduler.enqueue(taskDescription, steps, priority, [], tools)
     if (!Scheduler.isIdle()) {
       const label = priority === 0 ? '⚡' : priority === 2 ? '💤' : '📥'
       showActivity(`${label} Queued: ${taskDescription.slice(0, 40)}...`)
@@ -601,8 +611,8 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
   }
 
   // Scheduler calls this when a slot opens
-  async function startWorker(taskDescription, plannedSteps, abort) {
-    console.log(`[startWorker] called: "${taskDescription.slice(0, 60)}"`)  // DEBUG
+  async function startWorker(taskDescription, plannedSteps, abort, presetTools) {
+    console.log(`[startWorker] called: "${taskDescription.slice(0, 60)}" presetTools=${presetTools?.length || 0}`)
     const workerId = Dispatcher.nextWorkerId()
     Dispatcher.registerWorker(workerId, taskDescription, plannedSteps)
 
@@ -614,6 +624,61 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     blackboard.directive = null
     blackboard.completedSteps = []
     blackboard.workerLog = []
+
+    // --- Talker-Predicted Fast Lane: direct tool execution, no LLM ---
+    if (presetTools && presetTools.length > 0) {
+      // Build lightweight handler map for fast lane (toolHandlers not yet defined)
+      const fastHandlers = {
+        music: ({ action }) => { EventBus.emit('music.' + (action || 'play')); showActivity(`🎵 ${action || 'play'}`) },
+        open: ({ target, path, url }) => { EventBus.emit('window.open', { type: target || 'finder', path, url }); showActivity(`Opened ${target || 'finder'}`) },
+        set_wallpaper: ({ preset }) => { EventBus.emit('wallpaper.set', { preset }); showActivity(`🎨 Wallpaper: ${preset}`) },
+        fs: ({ action, path, content }) => {
+          if (action === 'write') { VFS.mkdir(path.split('/').slice(0, -1).join('/')); VFS.writeFile(path, content); showActivity(`Created ${path.split('/').pop()}`) }
+          else if (action === 'read') { return { content: VFS.readFile(path) } }
+          else if (action === 'list') { return { items: VFS.ls(path) } }
+          return { success: true }
+        },
+        write_file: ({ path, content }) => {
+          VFS.mkdir(path.split('/').slice(0, -1).join('/')); VFS.writeFile(path, content || ''); showActivity(`Created ${path.split('/').pop()}`)
+          return { success: true }
+        },
+        read_file: ({ path }) => {
+          const c = VFS.readFile(path); return c !== null ? { content: c } : { error: `Not found: ${path}` }
+        },
+        run_command: async ({ command }) => {
+          showActivity(`$ ${command}`); return { output: await Shell.execAsync(command) || '(no output)' }
+        },
+      }
+      let allHandled = true
+      for (const toolCall of presetTools) {
+        const handler = fastHandlers[toolCall.name]
+        if (handler) {
+          try {
+            await handler(toolCall.params || {})
+          } catch (e) {
+            console.warn(`[FastLane] tool ${toolCall.name} error:`, e.message)
+            allHandled = false
+            break
+          }
+        } else {
+          console.log(`[FastLane] unknown tool: ${toolCall.name}, falling through to Worker LLM`)
+          allHandled = false
+          break
+        }
+      }
+      if (allHandled) {
+        steps.forEach(s => { s.status = 'done' })
+        task.status = 'done'
+        blackboard.currentTask.status = 'done'
+        WindowManager.updateTask(task)
+        setWorkerStatus(Scheduler.isIdle() ? '\u2705 Done' : '\u23f3 ' + Scheduler.getState().pending.length + ' queued')
+        showActivity('\u26a1 ' + taskDescription.slice(0, 40))
+        Dispatcher.updateWorker(workerId, { status: 'done', turnCount: 0 })
+        Dispatcher.removeWorker(workerId)
+        return
+      }
+      // Fall through to Worker LLM if not all tools handled
+    }
 
     setWorkerStatus('🔄 Working...')
     showActivity(`Starting: ${taskDescription.slice(0, 50)}...`)
@@ -938,33 +1003,6 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         .map(([name, { desc, schema }]) => ({
           name, description: desc, input_schema: schema
         }))
-    }
-
-    // --- Fast Lane: single-tool tasks skip LLM ---
-    function tryFastLane(desc) {
-      const d = desc.toLowerCase()
-      if (/play\s+(music|song|track)|resume\s+music|pause\s+music|stop\s+music|next\s+(track|song)|prev(ious)?\s+(track|song)|shuffle/i.test(desc)) {
-        const action = /pause|stop/i.test(d) ? 'pause' : /next/i.test(d) ? 'next' : /prev/i.test(d) ? 'previous' : /shuffle/i.test(d) ? 'shuffle' : /resume/i.test(d) ? 'play' : 'play'
-        return allHandlers.music?.({ action })
-      }
-      const openMatch = desc.match(/open\s+(finder|editor|terminal|browser|music|map)/i)
-      if (openMatch) return allHandlers.open?.({ target: openMatch[1].toLowerCase() })
-      const wpMatch = desc.match(/(?:set|change)\s+wallpaper\s+(?:to\s+)?(aurora|sunset|ocean|forest|lavender|midnight|rose|sky)/i)
-      if (wpMatch) return allHandlers.set_wallpaper?.({ preset: wpMatch[1].toLowerCase() })
-      return null
-    }
-
-    const fastResult = tryFastLane(taskDescription)
-    if (fastResult) {
-      steps.forEach(s => { s.status = 'done' })
-      task.status = 'done'
-      blackboard.currentTask.status = 'done'
-      WindowManager.updateTask(task)
-      setWorkerStatus(Scheduler.isIdle() ? '\u2705 Done' : '\u23f3 ' + Scheduler.getState().pending.length + ' queued')
-      showActivity('\u26a1 Fast: ' + taskDescription.slice(0, 40))
-      Dispatcher.updateWorker(workerId, { status: 'done', turnCount: 1 })
-      Dispatcher.removeWorker(workerId)
-      return
     }
 
     // --- Turn Loop: ai.step() with Dispatcher checkpoints ---
@@ -1324,7 +1362,7 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
   // Wire Scheduler to startWorker
   Scheduler._onStart = (entry, slotIndex, abort) => startWorker(
     typeof entry.task === 'string' ? entry.task : entry.task.description || JSON.stringify(entry.task),
-    entry.steps, abort
+    entry.steps, abort, entry.tools || null
   )
 
   return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getScheduler: () => Scheduler, renderBubbleContent, _messages: messages, getSkills: () => Array.from(customSkills.entries()).map(([name, s]) => ({ name, icon: s.icon, description: s.description })), deleteSkill: (name) => { customSkills.delete(name); VFS.rm(`/system/skills/${name}`, true) }, getTaskHistory: () => WindowManager.getTaskHistory?.() || [] }
