@@ -256,7 +256,7 @@ const WindowManager = (() => {
       if (body) body.style.pointerEvents = 'none'
     })
 
-    desktopArea.appendChild(w)
+    area().appendChild(w)
     const winObj = { id, type, el: w, data: data || {}, _norm: norm }
     windows.set(id, winObj)
 
