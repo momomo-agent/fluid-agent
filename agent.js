@@ -338,8 +338,15 @@ const Agent = (() => {
                 Scheduler.abort(decision.workerId || null)
                 setWorkerStatus('')
                 showActivity('Tasks cleared')
+              } else {
+                // Fallback: Dispatcher returned noop/continue but Talker said execute — don't drop it
+                enqueueTask(action.task || userMsg, action.steps || [], action.priority ?? 1)
               }
-            }).catch(err => console.error('[Dispatcher] error:', err.message))
+            }).catch(err => {
+              console.error('[Dispatcher] error:', err.message)
+              // On error, still create the task so it's not lost
+              enqueueTask(action.task || userMsg, action.steps || [], action.priority ?? 1)
+            })
           } else {
             enqueueTask(action.task || userMsg, action.steps, action.priority ?? 1)
           }
