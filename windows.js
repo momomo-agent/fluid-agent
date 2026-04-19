@@ -41,16 +41,55 @@ const WindowManager = (() => {
         if (zone) window._snapHelpers.applySnap(zone, _activeDrag.el)
         window._snapHelpers.hideSnapPreview()
       }
+      // Update normalized position
+      const win = windows.get(_activeDrag.id)
+      if (win) win._norm = readNorm(_activeDrag.el)
       _activeDrag = null
     }
     if (_activeResize) {
       const body = _activeResize.el.querySelector('.window-body')
       if (body) body.style.pointerEvents = ''
+      // Update normalized size
+      const resId = _activeResize.el.id
+      const win = windows.get(resId)
+      if (win) win._norm = readNorm(_activeResize.el)
       _activeResize = null
     }
   })
 
-  // --- Smart window placement: find least-overlapping position ---
+  // --- Normalized coordinate helpers ---
+  // All window positions/sizes stored as 0-1 ratios relative to desktop-area
+  function getAreaSize() {
+    const el = document.getElementById('desktop-area')
+    return { w: el?.clientWidth || 800, h: el?.clientHeight || 600 }
+  }
+  function toPx(norm) {
+    const { w, h } = getAreaSize()
+    return { x: norm.x * w, y: norm.y * h, width: norm.width * w, height: norm.height * h }
+  }
+  function toNorm(px) {
+    const { w, h } = getAreaSize()
+    return { x: px.x / w, y: px.y / h, width: px.width / w, height: px.height / h }
+  }
+  function applyPx(el, norm) {
+    const px = toPx(norm)
+    el.style.left = px.x + 'px'
+    el.style.top = px.y + 'px'
+    el.style.width = px.width + 'px'
+    el.style.height = px.height + 'px'
+  }
+  function readNorm(el) {
+    return toNorm({ x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight })
+  }
+
+  // Reflow all windows on resize
+  window.addEventListener('resize', () => {
+    for (const [, win] of windows) {
+      if (win.el.classList.contains('minimized') || win.el.classList.contains('fullscreen')) continue
+      if (win._norm) applyPx(win.el, win._norm)
+    }
+  })
+
   function findBestPosition(ww, wh, areaW, areaH) {
     const existing = []
     for (const [, win] of windows) {
@@ -102,9 +141,7 @@ const WindowManager = (() => {
     const w = document.createElement('div')
     w.className = 'window'
     w.id = id
-    const desktopArea = document.getElementById('desktop-area')
-    const areaW = desktopArea?.clientWidth || 800
-    const areaH = desktopArea?.clientHeight || 600
+    const { w: areaW, h: areaH } = getAreaSize()
     const ww = width || 500
     const wh = height || 350
     let cx, cy
@@ -117,10 +154,9 @@ const WindowManager = (() => {
     // Clamp to desktop bounds
     cx = Math.max(0, Math.min(cx, areaW - Math.min(ww, areaW)))
     cy = Math.max(0, Math.min(cy, areaH - Math.min(wh, areaH)))
-    w.style.left = cx + 'px'
-    w.style.top = cy + 'px'
-    w.style.width = ww + 'px'
-    w.style.height = wh + 'px'
+    // Store normalized and apply px
+    const norm = toNorm({ x: cx, y: cy, width: ww, height: wh })
+    applyPx(w, norm)
     w.style.zIndex = ++topZ
 
     w.innerHTML = `
@@ -177,8 +213,8 @@ const WindowManager = (() => {
         { label: isFs ? 'Exit Fullscreen' : 'Fullscreen', action: () => toggleFullscreen(id) },
         { label: 'Minimize', action: () => minimize(id) },
         '---',
-        { label: 'Tile Left', action: () => { const a = document.getElementById('desktop-area'); const h = a.offsetHeight; Object.assign(w.style, { left: '0', top: '0', width: a.offsetWidth/2+'px', height: h+'px' }) } },
-        { label: 'Tile Right', action: () => { const a = document.getElementById('desktop-area'); const h = a.offsetHeight; Object.assign(w.style, { left: a.offsetWidth/2+'px', top: '0', width: a.offsetWidth/2+'px', height: h+'px' }) } },
+        { label: 'Tile Left', action: () => { const win = windows.get(id); if (win) { win._norm = { x: 0, y: 0, width: 0.5, height: 1 }; applyPx(w, win._norm) } } },
+        { label: 'Tile Right', action: () => { const win = windows.get(id); if (win) { win._norm = { x: 0.5, y: 0, width: 0.5, height: 1 }; applyPx(w, win._norm) } } },
         '---',
         { label: 'Close', action: () => _close(id) },
       ])
@@ -195,7 +231,7 @@ const WindowManager = (() => {
     })
 
     desktopArea.appendChild(w)
-    const winObj = { id, type, el: w, data: data || {} }
+    const winObj = { id, type, el: w, data: data || {}, _norm: norm }
     windows.set(id, winObj)
 
     // Render content
@@ -860,19 +896,19 @@ const WindowManager = (() => {
     const areaEl = document.getElementById('desktop-area')
     return {
       desktop: { width: areaEl?.clientWidth || 0, height: areaEl?.clientHeight || 0 },
-      windows: [...windows.values()].map(w => ({
-        id: w.id,
-        type: w.type,
-        title: w.el.querySelector('.window-title')?.textContent || w.type,
-        focused: w.el.classList.contains('focused'),
-        minimized: w.el.classList.contains('minimized'),
-        fullscreen: w.el.classList.contains('fullscreen'),
-        x: w.el.offsetLeft,
-        y: w.el.offsetTop,
-        width: w.el.offsetWidth,
-        height: w.el.offsetHeight,
-        path: w.data?.path || null,
-      })),
+      windows: [...windows.values()].map(w => {
+        const norm = w._norm || readNorm(w.el)
+        return {
+          id: w.id,
+          type: w.type,
+          title: w.el.querySelector('.window-title')?.textContent || w.type,
+          focused: w.el.classList.contains('focused'),
+          minimized: w.el.classList.contains('minimized'),
+          fullscreen: w.el.classList.contains('fullscreen'),
+          x: norm.x, y: norm.y, width: norm.width, height: norm.height,
+          path: w.data?.path || null,
+        }
+      }),
       focusedWindow: focused ? { type: focused.type, title: focused.el.querySelector('.window-title')?.textContent, path: focused.data?.path } : null,
       music: {
         playing: musicState.playing,
@@ -1915,13 +1951,14 @@ ${css}
       for (const [id, w] of windows) {
         const el = w.el
         if (el.classList.contains('closing')) continue
+        const norm = w._norm || readNorm(el)
         snapshot.push({
           type: w.type,
           title: el.querySelector('.window-title')?.textContent || w.type,
-          x: parseInt(el.style.left) || 0,
-          y: parseInt(el.style.top) || 0,
-          width: parseInt(el.style.width) || 500,
-          height: parseInt(el.style.height) || 350,
+          nx: norm.x,
+          ny: norm.y,
+          nw: norm.width,
+          nh: norm.height,
           focused: el.classList.contains('focused'),
           minimized: el.classList.contains('minimized'),
           data: w.data || {},
@@ -1937,19 +1974,28 @@ ${css}
     const snapshot = await store.get('session')
     if (!snapshot || !Array.isArray(snapshot) || snapshot.length === 0) return false
 
+    const { w: areaW, h: areaH } = getAreaSize()
     let focusId = null
     for (const win of snapshot) {
+      // Support both normalized (nx/ny/nw/nh) and legacy px (x/y/width/height)
+      let x, y, width, height
+      if (win.nx !== undefined) {
+        x = win.nx * areaW; y = win.ny * areaH
+        width = win.nw * areaW; height = win.nh * areaH
+      } else {
+        x = win.x; y = win.y; width = win.width; height = win.height
+      }
       let id = null
       try {
         switch (win.type) {
-          case 'finder': id = create({ type: 'finder', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
-          case 'terminal': id = create({ type: 'terminal', title: 'Terminal', x: win.x, y: win.y, width: win.width, height: win.height }); break
-          case 'editor': if (win.data?.path && VFS.isFile(win.data.path)) id = create({ type: 'editor', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
-          case 'settings': id = create({ type: 'settings', title: 'Settings', x: win.x, y: win.y, width: win.width, height: win.height }); settingsId = id; break
-          case 'browser': id = create({ type: 'browser', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
-          case 'map': id = create({ type: 'map', title: 'Map', x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); mapId = id; break
-          case 'music': id = create({ type: 'music', title: 'Music', x: win.x, y: win.y, width: win.width, height: win.height }); musicId = id; break
-          case 'app': if (win.data?.name && installedApps.has(win.data.name)) id = create({ type: 'app', title: win.title, x: win.x, y: win.y, width: win.width, height: win.height, data: win.data }); break
+          case 'finder': id = create({ type: 'finder', title: win.title, x, y, width, height, data: win.data }); break
+          case 'terminal': id = create({ type: 'terminal', title: 'Terminal', x, y, width, height }); break
+          case 'editor': if (win.data?.path && VFS.isFile(win.data.path)) id = create({ type: 'editor', title: win.title, x, y, width, height, data: win.data }); break
+          case 'settings': id = create({ type: 'settings', title: 'Settings', x, y, width, height }); settingsId = id; break
+          case 'browser': id = create({ type: 'browser', title: win.title, x, y, width, height, data: win.data }); break
+          case 'map': id = create({ type: 'map', title: 'Map', x, y, width, height, data: win.data }); mapId = id; break
+          case 'music': id = create({ type: 'music', title: 'Music', x, y, width, height }); musicId = id; break
+          case 'app': if (win.data?.name && installedApps.has(win.data.name)) id = create({ type: 'app', title: win.title, x, y, width, height, data: win.data }); break
           // Skip transient types: plan, taskmanager, video, image
         }
       } catch (e) { /* skip broken windows */ }
@@ -1980,8 +2026,13 @@ ${css}
     if (!id) return false
     const w = windows.get(id)
     if (!w) return false
-    w.el.style.left = x + 'px'
-    w.el.style.top = y + 'px'
+    // Accept normalized (0-1) or px (>1)
+    const { w: aW, h: aH } = getAreaSize()
+    const px_x = x <= 1 ? x * aW : x
+    const px_y = y <= 1 ? y * aH : y
+    w.el.style.left = px_x + 'px'
+    w.el.style.top = px_y + 'px'
+    w._norm = readNorm(w.el)
     return true
   }
 
@@ -1990,8 +2041,10 @@ ${css}
     if (!id) return false
     const w = windows.get(id)
     if (!w) return false
-    if (width) w.el.style.width = width + 'px'
-    if (height) w.el.style.height = height + 'px'
+    const { w: aW, h: aH } = getAreaSize()
+    if (width) w.el.style.width = (width <= 1 ? width * aW : width) + 'px'
+    if (height) w.el.style.height = (height <= 1 ? height * aH : height) + 'px'
+    w._norm = readNorm(w.el)
     return true
   }
 
@@ -2017,46 +2070,37 @@ ${css}
   }
 
   function tileWindows(layout) {
-    const area = document.getElementById('desktop-area')
-    const aW = area?.clientWidth || 800
-    const aH = area?.clientHeight || 600
     const ids = [...windows.keys()].filter(id => {
       const w = windows.get(id)
       return w && !w.el.classList.contains('minimized')
     })
     if (ids.length === 0) return false
+    const n = ids.length
     if (layout === 'horizontal') {
-      const w = Math.floor(aW / ids.length)
       ids.forEach((id, i) => {
         const win = windows.get(id)
-        win.el.style.left = (i * w) + 'px'
-        win.el.style.top = '0px'
-        win.el.style.width = w + 'px'
-        win.el.style.height = aH + 'px'
+        const norm = { x: i / n, y: 0, width: 1 / n, height: 1 }
+        win._norm = norm
+        applyPx(win.el, norm)
       })
     } else if (layout === 'grid') {
-      const cols = Math.ceil(Math.sqrt(ids.length))
-      const rows = Math.ceil(ids.length / cols)
-      const cw = Math.floor(aW / cols)
-      const ch = Math.floor(aH / rows)
+      const cols = Math.ceil(Math.sqrt(n))
+      const rows = Math.ceil(n / cols)
       ids.forEach((id, i) => {
         const win = windows.get(id)
         const col = i % cols
         const row = Math.floor(i / cols)
-        win.el.style.left = (col * cw) + 'px'
-        win.el.style.top = (row * ch) + 'px'
-        win.el.style.width = cw + 'px'
-        win.el.style.height = ch + 'px'
+        const norm = { x: col / cols, y: row / rows, width: 1 / cols, height: 1 / rows }
+        win._norm = norm
+        applyPx(win.el, norm)
       })
     } else {
       // vertical (default)
-      const h = Math.floor(aH / ids.length)
       ids.forEach((id, i) => {
         const win = windows.get(id)
-        win.el.style.left = '0px'
-        win.el.style.top = (i * h) + 'px'
-        win.el.style.width = aW + 'px'
-        win.el.style.height = h + 'px'
+        const norm = { x: 0, y: i / n, width: 1, height: 1 / n }
+        win._norm = norm
+        applyPx(win.el, norm)
       })
     }
     return true
