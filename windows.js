@@ -1787,16 +1787,90 @@ document.getElementById('search').addEventListener('keydown', function(e) {
     return id
   }
 
+  // ── App Bridge: allows apps to call system tools via postMessage ──
+  const APP_BRIDGE_SCRIPT = `
+<script>
+window.fluidOS = {
+  setWallpaper: (opts) => window.fluidOS._call('set_wallpaper', opts),
+  playMusic: (opts) => window.fluidOS._call('music', { action: 'play', ...opts }),
+  notify: (msg) => window.fluidOS._call('notify', { message: msg }),
+  openFile: (path) => window.fluidOS._call('open_file', { path }),
+  _call: (tool, params) => {
+    const id = Math.random().toString(36).slice(2)
+    parent.postMessage({ type: 'fluidOS.tool', id, tool, params }, '*')
+    return new Promise((resolve) => {
+      const handler = (e) => {
+        if (e.data?.type === 'fluidOS.result' && e.data.id === id) {
+          window.removeEventListener('message', handler)
+          resolve(e.data.result)
+        }
+      }
+      window.addEventListener('message', handler)
+      setTimeout(() => { window.removeEventListener('message', handler); resolve({ error: 'timeout' }) }, 10000)
+    })
+  }
+}
+<\/script>`
+
+  // Listen for bridge calls from app iframes
+  window.addEventListener('message', async (e) => {
+    if (e.data?.type !== 'fluidOS.tool') return
+    const { id, tool, params } = e.data
+    const handler = _appBridgeHandlers[tool]
+    const result = handler ? await handler(params) : { error: `Unknown bridge tool: ${tool}` }
+    e.source?.postMessage({ type: 'fluidOS.result', id, result }, '*')
+  })
+
+  // Allowed tools for app bridge (subset of full tool set)
+  const _appBridgeHandlers = {}
+  function registerBridgeHandler(name, fn) { _appBridgeHandlers[name] = fn }
+
+  // Built-in bridge handlers (system-level, no agent context needed)
+  _appBridgeHandlers.set_wallpaper = ({ css, url, preset }) => {
+    const el = document.getElementById('desktop-wallpaper')
+    if (!el) return { error: 'No wallpaper element' }
+    if (url) {
+      el.style.background = `url(${url}) center/cover no-repeat`
+    } else if (css) {
+      el.style.background = css
+    } else if (preset) {
+      const presets = {
+        aurora: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)',
+        sunset: 'linear-gradient(135deg, #ff6b6b 0%, #ffa07a 30%, #ffd700 60%, #ff4500 100%)',
+        ocean: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)',
+        forest: 'linear-gradient(135deg, #134e5e 0%, #71b280 50%, #d4fc79 100%)',
+        lavender: 'linear-gradient(135deg, #e8f0fe 0%, #f0e6ff 30%, #e6f7f0 60%, #fef3e0 100%)',
+        midnight: 'linear-gradient(135deg, #0a0a2e 0%, #1a1a4e 40%, #2d1b69 70%, #0a0a2e 100%)',
+        rose: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 50%, #ff9a9e 100%)',
+        sky: 'radial-gradient(ellipse at 20% 50%, rgba(120,180,255,0.25) 0%, transparent 50%), radial-gradient(ellipse at 80% 20%, rgba(200,150,255,0.2) 0%, transparent 50%), radial-gradient(ellipse at 50% 80%, rgba(100,220,200,0.15) 0%, transparent 50%), linear-gradient(135deg, #e8f0fe 0%, #f0e6ff 30%, #e6f7f0 60%, #fef3e0 100%)',
+      }
+      el.style.background = presets[preset] || presets.sky
+      if (!presets[preset]) return { error: `Unknown preset. Available: ${Object.keys(presets).join(', ')}` }
+    }
+    return { success: true }
+  }
+
+  _appBridgeHandlers.notify = ({ message }) => {
+    // Show a toast/notification
+    const toast = document.createElement('div')
+    toast.className = 'app-bridge-toast'
+    toast.textContent = message
+    toast.style.cssText = 'position:fixed;top:40px;right:20px;background:rgba(30,30,60,0.95);color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;z-index:99999;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.1);animation:fadeInOut 3s forwards'
+    document.body.appendChild(toast)
+    setTimeout(() => toast.remove(), 3000)
+    return { success: true }
+  }
+
   function renderApp(w, body) {
     const { html, css, js } = w.data || {}
-    // Sandboxed iframe with generated content
+    // Sandboxed iframe with generated content + bridge
     const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; }
 button { cursor: pointer; }
 input, select, textarea { font-family: inherit; }
 ${css}
-</style></head><body>${html}<script>${js}<\/script></body></html>`
+</style>${APP_BRIDGE_SCRIPT}</head><body>${html}<script>${js}<\/script></body></html>`
     // Use srcdoc for inline content — allows external CDN loads without blob origin issues
     const iframe = document.createElement('iframe')
     iframe.style.cssText = 'width:100%;height:100%;border:none'
@@ -2031,5 +2105,5 @@ ${css}
     return { index: idx }
   }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openLaunchpad, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, moveWindow, resizeWindow, minimizeByTitle, maximizeByTitle, unminimizeByTitle, tileWindows, musicAddTrack, getTaskHistory() { return taskHistory }, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openLaunchpad, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, moveWindow, resizeWindow, minimizeByTitle, maximizeByTitle, unminimizeByTitle, tileWindows, musicAddTrack, registerBridgeHandler, getTaskHistory() { return taskHistory }, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()

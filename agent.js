@@ -800,6 +800,14 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         showActivity(`✅ Step ${step_index + 1} done`)
         return { success: true }
       },
+      plan_steps: ({ planned }) => {
+        if (!Array.isArray(planned) || !planned.length) return { error: 'planned must be non-empty array of strings' }
+        steps.length = 0
+        planned.forEach(s => steps.push({ text: s, status: 'pending' }))
+        task.steps = steps
+        WindowManager.updateTask(task)
+        return { success: true, steps: planned }
+      },
       done: async ({ summary }) => {
         task.status = 'done'
         blackboard.currentTask.status = 'done'
@@ -843,6 +851,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       app: { desc: 'Manage generative apps. PREFERRED workflow: 1) Write files to /home/user/apps/<name>/ using fs tool (index.html, style.css, script.js), 2) Call app create with just name+width+height. This avoids token limits. You can also pass html/css/js inline for tiny apps. Size guide: calculator~320x420, text tool~500x400, dashboard~700x500, game~600x500.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'uninstall', 'list'] }, name: { type: 'string' }, html: { type: 'string', description: 'Optional if files exist at /home/user/apps/<name>/' }, css: { type: 'string' }, js: { type: 'string' }, icon: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, description: { type: 'string' } }, required: ['action'] } },
       skill: { desc: 'Manage skills (self-evolving tools): create, list, read, delete. Skills persist across sessions.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'list', 'read', 'delete'] }, name: { type: 'string' }, description: { type: 'string' }, icon: { type: 'string' }, schema: { type: 'object' }, handler: { type: 'string', description: 'JS function body. Receives (params, VFS, Shell, WindowManager).' } }, required: ['action'] } },
       update_progress: { desc: 'Mark a step as done by index (0-based)', schema: { type: 'object', properties: { step_index: { type: 'number' } }, required: ['step_index'] } },
+      plan_steps: { desc: 'Set your execution plan (call first if no steps provided)', schema: { type: 'object', properties: { planned: { type: 'array', items: { type: 'string' } } }, required: ['planned'] } },
       done: { desc: 'Signal task completion with summary', schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
       web_search: { desc: 'Search the web using Tavily for real-world facts and current events', schema: { type: 'object', properties: { query: { type: 'string' }, search_depth: { type: 'string', enum: ['basic', 'advanced'] } }, required: ['query'] } },
       web_fetch: { desc: 'Fetch and read web page content from a URL', schema: { type: 'object', properties: { url: { type: 'string' }, max_chars: { type: 'number' } }, required: ['url'] } },
@@ -863,7 +872,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     if (steps.length > 0) { steps[0].status = 'running'; WindowManager.updateTask(task) }
 
     // --- Tool Search: deferred tool loading ---
-    const alwaysAvailable = new Set(['fs', 'run_command', 'update_progress', 'done', 'search_tools'])
+    const alwaysAvailable = new Set(['fs', 'run_command', 'update_progress', 'plan_steps', 'done', 'search_tools'])
     const loadedTools = new Set([...alwaysAvailable])
     const toolCatalog = Object.fromEntries(
       Object.entries(toolDefs).map(([name, { desc }]) => [name, desc])
@@ -949,10 +958,10 @@ Current OS state:
 - Installed apps: ${os.installedApps}
 
 Planned steps:
-${steps.map((s, i) => `${i}. ${s.text}`).join('\n')}
+${steps.length ? steps.map((s, i) => `${i}. ${s.text}`).join('\n') : '(none — call plan_steps first to set your execution plan)'}
 
 ## Tool System
-Always available: fs, run_command, update_progress, done, search_tools.
+Always available: fs, run_command, update_progress, plan_steps, done, search_tools.
 
 All other tools — call search_tools({names: [...]}) to activate:
 ${extendedToolList}
@@ -973,11 +982,18 @@ For anything beyond a trivial app, use the file-driven workflow:
    It auto-loads from the directory. This avoids output token limits.
 Only use inline html param for tiny apps (< 50 lines).
 
+## App Bridge API
+Apps run in sandboxed iframes but can call system functions via window.fluidOS:
+- window.fluidOS.setWallpaper({url}) or ({preset}) or ({css}) — change desktop wallpaper
+- window.fluidOS.notify(message) — show system notification toast
+- window.fluidOS.playMusic({title, artist, url}) — play a track
+When creating apps that need system interaction (e.g. wallpaper setters, music players), use these APIs instead of trying to manipulate the parent DOM directly.
+
 ## Music Workflow
 To play music: search_music({query}) → get results with URLs → music({action: "add_and_play", title, artist, url: playUrl or previewUrl, artwork}).
 NetEase results have full MP3 playUrl. iTunes results have 30s previewUrl.
 
-IMPORTANT: After completing each planned step, call update_progress with the step_index.
+IMPORTANT: If no planned steps are listed above, call plan_steps FIRST to set your execution plan. After completing each step, call update_progress with the step_index.
 When finished, call the done tool with a summary. Set summary to "silent" if the action itself IS the result (e.g. playing music, changing wallpaper, opening an app). Only write a detailed summary when there are findings or information the user needs to read.`
 
     let workerMessages = [{ role: 'user', content: taskDescription }]
