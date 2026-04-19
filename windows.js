@@ -808,6 +808,7 @@ const WindowManager = (() => {
     body.innerHTML = `<div class="tm-layout">
       <div class="tm-tabs">
         <button class="tm-tab ${currentView === 'detail' ? 'active' : ''}" data-view="detail">Tasks</button>
+        <button class="tm-tab ${currentView === 'log' ? 'active' : ''}" data-view="log">Log${selected?.log.length ? ` · ${selected.log.length}` : ''}</button>
         <button class="tm-tab ${currentView === 'queue' ? 'active' : ''}" data-view="queue">Queue${ds.running.length + ds.pending.length > 0 ? ` · ${ds.running.length + ds.pending.length}` : ''}</button>
       </div>
       ${currentView === 'queue' ? `
@@ -815,6 +816,10 @@ const WindowManager = (() => {
         ${ds.running.length ? `<div class="tm-queue-section">Running</div>${ds.running.map(r => `<div class="tm-queue-item running"><span>▶</span><span>${r.task.slice(0,50)}</span></div>`).join('')}` : ''}
         ${ds.pending.length ? `<div class="tm-queue-section">Queued</div>${ds.pending.map(p => `<div class="tm-queue-item pending"><span>${p.priority === 0 ? '⚡' : p.priority === 2 ? '💤' : '○'}</span><span>${p.task.slice(0,50)}</span></div>`).join('')}` : ''}
         ${!ds.running.length && !ds.pending.length ? '<div class="tm-empty">Queue is empty</div>' : ''}
+      </div>` : currentView === 'log' ? `
+      <div class="tm-log-view">
+        <div class="tm-log-header">${selected ? selected.goal.slice(0, 50) : 'No task selected'}</div>
+        <div class="tm-log-body">${selected?.log.length ? selected.log.map((l, i) => `<div class="tm-log-entry"><span class="tm-log-idx">${i + 1}</span><span class="tm-log-text">${l}</span></div>`).join('') : '<div class="tm-empty">No logs yet</div>'}</div>
       </div>` : `
       <div class="tm-content"><div class="tm-list">${taskHistory.map(t => `
         <div class="tm-item ${t.status} ${t.id === selected?.id ? 'active' : ''}" data-id="${t.id}">
@@ -830,7 +835,6 @@ const WindowManager = (() => {
             <span>${s.text}</span>
           </div>`).join('')}
         </div>
-        ${selected.log.length ? `<div class="tm-log">${selected.log.slice(-8).map(l => `<div class="tm-log-line">${l}</div>`).join('')}</div>` : ''}
       ` : '<div class="tm-empty">Select a task</div>'}</div></div>`}
     </div>`
 
