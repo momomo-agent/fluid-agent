@@ -9,6 +9,18 @@ const WindowManager = (() => {
   let _activeDrag = null   // { el, id, offsetX, offsetY }
   let _activeResize = null // { el, startX, startY, startW, startH }
 
+  // --- Full-screen overlay to prevent iframe gesture theft during drag/resize ---
+  let _dragOverlay = null
+  function showDragOverlay() {
+    if (_dragOverlay) return
+    _dragOverlay = document.createElement('div')
+    _dragOverlay.style.cssText = 'position:fixed;inset:0;z-index:999999;cursor:inherit;'
+    document.body.appendChild(_dragOverlay)
+  }
+  function hideDragOverlay() {
+    if (_dragOverlay) { _dragOverlay.remove(); _dragOverlay = null }
+  }
+
   document.addEventListener('mousemove', e => {
     if (_activeDrag) {
       const d = _activeDrag
@@ -45,6 +57,7 @@ const WindowManager = (() => {
       const win = windows.get(_activeDrag.id)
       if (win) win._norm = readNorm(_activeDrag.el)
       _activeDrag = null
+      hideDragOverlay()
     }
     if (_activeResize) {
       const body = _activeResize.el.querySelector('.window-body')
@@ -54,6 +67,7 @@ const WindowManager = (() => {
       const win = windows.get(resId)
       if (win) win._norm = readNorm(_activeResize.el)
       _activeResize = null
+      hideDragOverlay()
     }
   })
 
@@ -198,6 +212,7 @@ const WindowManager = (() => {
     titlebar.addEventListener('mousedown', e => {
       if (e.target.classList.contains('window-dot')) return
       _activeDrag = { el: w, id, offsetX: e.clientX - w.offsetLeft, offsetY: e.clientY - w.offsetTop }
+      showDragOverlay()
       focus(id)
       const body = w.querySelector('.window-body')
       if (body) body.style.pointerEvents = 'none'
@@ -226,6 +241,7 @@ const WindowManager = (() => {
       e.stopPropagation()
       e.preventDefault()
       _activeResize = { el: w, startX: e.clientX, startY: e.clientY, startW: w.offsetWidth, startH: w.offsetHeight }
+      showDragOverlay()
       const body = w.querySelector('.window-body')
       if (body) body.style.pointerEvents = 'none'
     })
