@@ -563,8 +563,12 @@ For SIMPLE, OBVIOUS actions (open app, play/pause music, set wallpaper, etc.), i
 \`\`\`json
 {"action": "execute", "reply": "Here you go", "task": "open finder", "tools": [{"name": "open", "params": {"target": "finder"}}]}
 \`\`\`
+\`\`\`json
+{"action": "execute", "reply": "Done", "task": "create file", "tools": [{"name": "fs", "params": {"action": "write", "path": "/home/user/hello.txt", "content": "Hello!"}}]}
+\`\`\`
 When "tools" is present, the Worker executes them directly without an LLM call — instant response.
-Only use "tools" for single-step, unambiguous operations. For anything complex, omit "tools" and let the Worker figure it out.
+Only use "tools" for single-step, unambiguous operations where you know the exact tool name and params. Tool names MUST match exactly: fs, run_command, open, music, set_wallpaper, browser, map, video, window, app, skill.
+For anything complex or multi-step, omit "tools" and let the Worker figure it out.
 
 2. STEER a running task:
 \`\`\`json
@@ -624,61 +628,6 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     blackboard.directive = null
     blackboard.completedSteps = []
     blackboard.workerLog = []
-
-    // --- Talker-Predicted Fast Lane: direct tool execution, no LLM ---
-    if (presetTools && presetTools.length > 0) {
-      // Build lightweight handler map for fast lane (toolHandlers not yet defined)
-      const fastHandlers = {
-        music: ({ action }) => { EventBus.emit('music.' + (action || 'play')); showActivity(`🎵 ${action || 'play'}`) },
-        open: ({ target, path, url }) => { EventBus.emit('window.open', { type: target || 'finder', path, url }); showActivity(`Opened ${target || 'finder'}`) },
-        set_wallpaper: ({ preset }) => { EventBus.emit('wallpaper.set', { preset }); showActivity(`🎨 Wallpaper: ${preset}`) },
-        fs: ({ action, path, content }) => {
-          if (action === 'write') { VFS.mkdir(path.split('/').slice(0, -1).join('/')); VFS.writeFile(path, content); showActivity(`Created ${path.split('/').pop()}`) }
-          else if (action === 'read') { return { content: VFS.readFile(path) } }
-          else if (action === 'list') { return { items: VFS.ls(path) } }
-          return { success: true }
-        },
-        write_file: ({ path, content }) => {
-          VFS.mkdir(path.split('/').slice(0, -1).join('/')); VFS.writeFile(path, content || ''); showActivity(`Created ${path.split('/').pop()}`)
-          return { success: true }
-        },
-        read_file: ({ path }) => {
-          const c = VFS.readFile(path); return c !== null ? { content: c } : { error: `Not found: ${path}` }
-        },
-        run_command: async ({ command }) => {
-          showActivity(`$ ${command}`); return { output: await Shell.execAsync(command) || '(no output)' }
-        },
-      }
-      let allHandled = true
-      for (const toolCall of presetTools) {
-        const handler = fastHandlers[toolCall.name]
-        if (handler) {
-          try {
-            await handler(toolCall.params || {})
-          } catch (e) {
-            console.warn(`[FastLane] tool ${toolCall.name} error:`, e.message)
-            allHandled = false
-            break
-          }
-        } else {
-          console.log(`[FastLane] unknown tool: ${toolCall.name}, falling through to Worker LLM`)
-          allHandled = false
-          break
-        }
-      }
-      if (allHandled) {
-        steps.forEach(s => { s.status = 'done' })
-        task.status = 'done'
-        blackboard.currentTask.status = 'done'
-        WindowManager.updateTask(task)
-        setWorkerStatus(Scheduler.isIdle() ? '\u2705 Done' : '\u23f3 ' + Scheduler.getState().pending.length + ' queued')
-        showActivity('\u26a1 ' + taskDescription.slice(0, 40))
-        Dispatcher.updateWorker(workerId, { status: 'done', turnCount: 0 })
-        Dispatcher.removeWorker(workerId)
-        return
-      }
-      // Fall through to Worker LLM if not all tools handled
-    }
 
     setWorkerStatus('🔄 Working...')
     showActivity(`Starting: ${taskDescription.slice(0, 50)}...`)
@@ -972,6 +921,39 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     const allHandlers = { ...toolHandlers, ...skillTools.handlers }
     for (const [name, { desc }] of Object.entries(skillTools.tools)) {
       toolCatalog[name] = desc
+    }
+
+    // --- Talker-Predicted Fast Lane: Talker said these tools are enough, execute directly ---
+    if (presetTools && presetTools.length > 0) {
+      let allHandled = true
+      for (const toolCall of presetTools) {
+        const handler = allHandlers[toolCall.name]
+        if (handler) {
+          try {
+            await handler(toolCall.params || {})
+          } catch (e) {
+            console.warn(`[FastLane] tool ${toolCall.name} error:`, e.message)
+            allHandled = false
+            break
+          }
+        } else {
+          console.log(`[FastLane] unknown tool: ${toolCall.name}, falling through to Worker LLM`)
+          allHandled = false
+          break
+        }
+      }
+      if (allHandled) {
+        steps.forEach(s => { s.status = 'done' })
+        task.status = 'done'
+        blackboard.currentTask.status = 'done'
+        WindowManager.updateTask(task)
+        setWorkerStatus(Scheduler.isIdle() ? '\u2705 Done' : '\u23f3 ' + Scheduler.getState().pending.length + ' queued')
+        showActivity('\u26a1 ' + taskDescription.slice(0, 40))
+        Dispatcher.updateWorker(workerId, { status: 'done', turnCount: 0 })
+        Dispatcher.removeWorker(workerId)
+        return
+      }
+      // Fall through to Worker LLM
     }
 
     function makeExecutor(name) {
