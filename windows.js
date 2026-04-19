@@ -93,14 +93,20 @@ const WindowManager = (() => {
   }
 
   // Reflow all windows on desktop-area resize
+  let _reflowRaf = null
   const _resizeObserver = new ResizeObserver(() => {
-    for (const [, win] of windows) {
-      if (win.el.classList.contains('minimized') || win.el.classList.contains('fullscreen')) continue
-      if (!win._norm) win._norm = readNorm(win.el)
-      applyPx(win.el, win._norm)
-    }
+    // Debounce with rAF to ensure layout is settled
+    if (_reflowRaf) cancelAnimationFrame(_reflowRaf)
+    _reflowRaf = requestAnimationFrame(() => {
+      _reflowRaf = null
+      for (const [, win] of windows) {
+        if (win.el.classList.contains('minimized') || win.el.classList.contains('fullscreen')) continue
+        if (!win._norm) win._norm = readNorm(win.el)
+        applyPx(win.el, win._norm)
+      }
+    })
   })
-  // Observe once area exists (deferred if needed)
+  // Observe once area exists
   function _observeArea() {
     const el = document.getElementById('desktop-area')
     if (el) _resizeObserver.observe(el)
