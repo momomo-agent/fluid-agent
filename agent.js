@@ -330,7 +330,7 @@ const Agent = (() => {
           if (typeof Dispatcher !== 'undefined') {
             Dispatcher.handleIntent(action).then(decision => {
               if (decision.action === 'new') {
-                enqueueTask(decision.task || action.task || userMsg, decision.steps || action.steps, decision.priority ?? action.priority ?? 1, action.tools || null)
+                enqueueTask(decision.task || action.task || userMsg, decision.steps || action.steps, decision.priority ?? action.priority ?? 1)
               } else if (decision.action === 'steer' && decision.workerId) {
                 Dispatcher.pushIntent({ action: 'steer', instruction: decision.instruction })
                 showActivity(`↪ Steering #${decision.workerId}: ${(decision.instruction || '').slice(0, 40)}`)
@@ -341,7 +341,7 @@ const Agent = (() => {
               }
             }).catch(err => console.error('[Dispatcher] error:', err.message))
           } else {
-            enqueueTask(action.task || userMsg, action.steps, action.priority ?? 1, action.tools || null)
+            enqueueTask(action.task || userMsg, action.steps, action.priority ?? 1)
           }
         } else if (action.action === 'steer') {
           if (typeof Dispatcher !== 'undefined') {
@@ -555,23 +555,6 @@ Current OS state:
 \`\`\`json
 {"action": "execute", "reply": "your conversational reply", "task": "what to do", "steps": ["step 1", "step 2"], "priority": 1}
 \`\`\`
-
-For SIMPLE, OBVIOUS actions (open app, play/pause music, set wallpaper, etc.), include a "tools" array to skip the Worker LLM entirely:
-\`\`\`json
-{"action": "execute", "reply": "Playing now", "task": "play music", "tools": [{"name": "music", "params": {"action": "play"}}]}
-\`\`\`
-\`\`\`json
-{"action": "execute", "reply": "Here you go", "task": "open finder", "tools": [{"name": "open", "params": {"target": "finder"}}]}
-\`\`\`
-\`\`\`json
-{"action": "execute", "reply": "Done", "task": "create file", "tools": [{"name": "fs", "params": {"action": "write", "path": "/home/user/hello.txt", "content": "Hello!"}}]}
-\`\`\`
-When "tools" is present, the Worker executes them directly without an LLM call — instant response.
-Only use "tools" for single-step, unambiguous operations where you know the exact tool name and params. Tool names MUST match exactly: fs, run_command, open, music, set_wallpaper, browser, map, video, window, app, skill.
-For anything complex or multi-step, omit "tools" and let the Worker figure it out.
-
-2. STEER a running task:
-\`\`\`json
 {"action": "steer", "reply": "your reply", "instruction": "new direction"}
 \`\`\`
 
@@ -605,9 +588,9 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
   }
 
   // --- Task scheduling via Scheduler ---
-  function enqueueTask(taskDescription, steps, priority = 1, tools = null) {
-    console.log(`[enqueueTask] "${taskDescription.slice(0, 60)}" steps=${(steps||[]).length} priority=${priority} tools=${tools?.length || 0}`)
-    Scheduler.enqueue(taskDescription, steps, priority, [], tools)
+  function enqueueTask(taskDescription, steps, priority = 1) {
+    console.log(`[enqueueTask] "${taskDescription.slice(0, 60)}" steps=${(steps||[]).length} priority=${priority}`)
+    Scheduler.enqueue(taskDescription, steps, priority)
     if (!Scheduler.isIdle()) {
       const label = priority === 0 ? '⚡' : priority === 2 ? '💤' : '📥'
       showActivity(`${label} Queued: ${taskDescription.slice(0, 40)}...`)
@@ -615,8 +598,8 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
   }
 
   // Scheduler calls this when a slot opens
-  async function startWorker(taskDescription, plannedSteps, abort, presetTools) {
-    console.log(`[startWorker] called: "${taskDescription.slice(0, 60)}" presetTools=${presetTools?.length || 0}`)
+  async function startWorker(taskDescription, plannedSteps, abort) {
+    console.log(`[startWorker] called: "${taskDescription.slice(0, 60)}"`)
     const workerId = Dispatcher.nextWorkerId()
     Dispatcher.registerWorker(workerId, taskDescription, plannedSteps)
 
@@ -921,39 +904,6 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     const allHandlers = { ...toolHandlers, ...skillTools.handlers }
     for (const [name, { desc }] of Object.entries(skillTools.tools)) {
       toolCatalog[name] = desc
-    }
-
-    // --- Talker-Predicted Fast Lane: Talker said these tools are enough, execute directly ---
-    if (presetTools && presetTools.length > 0) {
-      let allHandled = true
-      for (const toolCall of presetTools) {
-        const handler = allHandlers[toolCall.name]
-        if (handler) {
-          try {
-            await handler(toolCall.params || {})
-          } catch (e) {
-            console.warn(`[FastLane] tool ${toolCall.name} error:`, e.message)
-            allHandled = false
-            break
-          }
-        } else {
-          console.log(`[FastLane] unknown tool: ${toolCall.name}, falling through to Worker LLM`)
-          allHandled = false
-          break
-        }
-      }
-      if (allHandled) {
-        steps.forEach(s => { s.status = 'done' })
-        task.status = 'done'
-        blackboard.currentTask.status = 'done'
-        WindowManager.updateTask(task)
-        setWorkerStatus(Scheduler.isIdle() ? '\u2705 Done' : '\u23f3 ' + Scheduler.getState().pending.length + ' queued')
-        showActivity('\u26a1 ' + taskDescription.slice(0, 40))
-        Dispatcher.updateWorker(workerId, { status: 'done', turnCount: 0 })
-        Dispatcher.removeWorker(workerId)
-        return
-      }
-      // Fall through to Worker LLM
     }
 
     function makeExecutor(name) {
@@ -1344,7 +1294,7 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
   // Wire Scheduler to startWorker
   Scheduler._onStart = (entry, slotIndex, abort) => startWorker(
     typeof entry.task === 'string' ? entry.task : entry.task.description || JSON.stringify(entry.task),
-    entry.steps, abort, entry.tools || null
+    entry.steps, abort
   )
 
   return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getScheduler: () => Scheduler, renderBubbleContent, _messages: messages, getSkills: () => Array.from(customSkills.entries()).map(([name, s]) => ({ name, icon: s.icon, description: s.description })), deleteSkill: (name) => { customSkills.delete(name); VFS.rm(`/system/skills/${name}`, true) }, getTaskHistory: () => WindowManager.getTaskHistory?.() || [] }

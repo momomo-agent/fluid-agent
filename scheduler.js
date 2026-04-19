@@ -8,9 +8,9 @@ const Scheduler = (() => {
 
   // --- Task lifecycle ---
 
-  function enqueue(taskDescription, steps = [], priority = 1, dependsOn = [], tools = null) {
+  function enqueue(taskDescription, steps = [], priority = 1, dependsOn = []) {
     const id = nextTaskId++
-    const entry = { id, task: taskDescription, steps, priority, dependsOn, tools, status: 'pending' }
+    const entry = { id, task: taskDescription, steps, priority, dependsOn, status: 'pending' }
     pending.push(entry)
     pending.sort((a, b) => a.priority - b.priority)
     EventBus.emit('scheduler.enqueued', { id, task: taskDescription, priority })
