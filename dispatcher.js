@@ -244,6 +244,49 @@ Rules:
     return decide(`New intent from Talker`, `Intent: ${JSON.stringify(intent)}`)
   }
 
+  // --- Batch Planning: analyze multiple intents for dependencies and merging ---
+  async function planBatch(intents) {
+    if (!_ai || intents.length === 0) return null
+    if (intents.length === 1) {
+      return { tasks: [{ index: intents[0].index, task: intents[0].task, steps: intents[0].steps, priority: intents[0].priority, dependsOn: [] }] }
+    }
+
+    try {
+      const resp = await _ai.think(
+        `Analyze these ${intents.length} tasks for dependencies and merge opportunities:\n\n${intents.map((t, i) => `[${t.index}] ${t.task}`).join('\n')}`,
+        {
+          system: `You are the Dispatcher of Fluid Agent OS. Given a batch of tasks from the user, analyze them and output a dependency plan.
+
+Rules:
+- Tasks that depend on another task's output must list that dependency (e.g., "create folder X" must finish before "write file in X")
+- Independent tasks can run in parallel (no dependencies)
+- Tasks that are nearly identical can be merged into one (e.g., "create file A" + "create file B" → "create files A and B")
+- Preserve the original index for tracking
+
+Respond with JSON only:
+{"tasks": [{"index": 0, "task": "description", "steps": [], "priority": 1, "dependsOn": []}, ...]}
+
+dependsOn contains indices of tasks this one depends on. Empty array = no dependencies = can run immediately.
+If merging tasks, use the lowest index and list all merged indices in "mergedFrom".
+Keep it minimal — don't over-complicate simple independent tasks.`,
+          stream: false,
+        }
+      )
+
+      const text = resp?.content || resp?.text || (typeof resp === 'string' ? resp : '')
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) return null
+      const plan = JSON.parse(jsonMatch[0])
+      if (!plan.tasks || !Array.isArray(plan.tasks)) return null
+
+      console.log(`[Dispatcher.planBatch] Planned ${plan.tasks.length} tasks from ${intents.length} intents`)
+      return plan
+    } catch (err) {
+      console.error('[Dispatcher.planBatch] Error:', err.message)
+      return null
+    }
+  }
+
   return {
     init, registerWorker, updateWorker, removeWorker, nextWorkerId,
     pushIntent, drainIntents,
@@ -251,6 +294,6 @@ Rules:
       const s = getStateSummary()
       return { running: s.workers.filter(w => w.status === 'running'), pending: s.workers.filter(w => w.status === 'suspended') }
     }, formatForTalker,
-    decide, beforeTurn, afterTurn, handleIntent,
+    decide, beforeTurn, afterTurn, handleIntent, planBatch,
   }
 })()

@@ -595,9 +595,9 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
   }
 
   // --- Task scheduling via Scheduler ---
-  function enqueueTask(taskDescription, steps, priority = 1) {
-    console.log(`[enqueueTask] "${taskDescription.slice(0, 60)}" steps=${(steps||[]).length} priority=${priority}`)
-    Scheduler.enqueue(taskDescription, steps, priority)
+  function enqueueTask(taskDescription, steps, priority = 1, dependsOn = []) {
+    console.log(`[enqueueTask] "${taskDescription.slice(0, 60)}" steps=${(steps||[]).length} priority=${priority} deps=[${dependsOn}]`)
+    Scheduler.enqueue(taskDescription, steps, priority, dependsOn)
     if (!Scheduler.isIdle()) {
       const label = priority === 0 ? '⚡' : priority === 2 ? '💤' : '📥'
       showActivity(`${label} Queued: ${taskDescription.slice(0, 40)}...`)
@@ -1232,23 +1232,98 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
     if (proactiveTimer) { clearInterval(proactiveTimer); proactiveTimer = null }
   }
 
-  // Track user activity + serial message queue
+  // Track user activity + serial message queue with batch support
   const origChat = chat
   const _chatQueue = []
   let _chatProcessing = false
+  const BATCH_WAIT_MS = 600  // Wait this long for more messages before processing
 
   async function _processChatQueue() {
     if (_chatProcessing) return
     _chatProcessing = true
+
     while (_chatQueue.length > 0) {
-      const { msg, resolve, reject } = _chatQueue.shift()
+      // Wait briefly for more messages to arrive (batch window)
+      if (_chatQueue.length === 1) {
+        await new Promise(r => setTimeout(r, BATCH_WAIT_MS))
+      }
+
+      // Single message — process normally
+      if (_chatQueue.length === 1) {
+        const { msg, resolve, reject } = _chatQueue.shift()
+        try {
+          const result = await origChat(msg)
+          resolve(result)
+        } catch (e) {
+          reject(e)
+        }
+        continue
+      }
+
+      // Multiple messages — batch mode
+      const batch = _chatQueue.splice(0, _chatQueue.length)
+      console.log(`[BatchChat] Processing ${batch.length} messages in batch`)
+
       try {
-        const result = await origChat(msg)
-        resolve(result)
-      } catch (e) {
-        reject(e)
+        // Step 1: Run all Talker calls in parallel
+        const talkerResults = await Promise.allSettled(
+          batch.map(({ msg }) => _chatSingleTalker(msg))
+        )
+
+        // Step 2: Collect execute intents
+        const intents = []
+        for (let i = 0; i < batch.length; i++) {
+          const r = talkerResults[i]
+          if (r.status === 'fulfilled' && r.value?.action) {
+            intents.push({ index: i, msg: batch[i].msg, action: r.value.action })
+          }
+        }
+
+        // Step 3: If multiple execute intents, ask Dispatcher to plan dependencies
+        const executeIntents = intents.filter(x => x.action.action === 'execute' || x.action.action === 'redirect')
+        if (executeIntents.length > 1 && typeof Dispatcher !== 'undefined' && Dispatcher.planBatch) {
+          const plan = await Dispatcher.planBatch(executeIntents.map(x => ({
+            index: x.index,
+            task: x.action.task || x.msg,
+            steps: x.action.steps || [],
+            priority: x.action.priority || 1,
+          })))
+
+          if (plan && plan.tasks) {
+            // Enqueue with dependency info
+            const idMap = {}  // plan index → scheduler task id
+            for (const pt of plan.tasks) {
+              const depIds = (pt.dependsOn || []).map(d => idMap[d]).filter(Boolean)
+              const id = Scheduler.enqueue(pt.task, pt.steps || [], pt.priority || 1, depIds)
+              idMap[pt.index] = id
+              const label = pt.priority === 0 ? '⚡' : pt.priority === 2 ? '💤' : '📥'
+              showActivity(`${label} Queued: ${pt.task.slice(0, 40)}...`)
+            }
+            console.log(`[BatchChat] Planned ${plan.tasks.length} tasks with dependencies`)
+          } else {
+            // Fallback: enqueue each independently
+            for (const ei of executeIntents) {
+              enqueueTask(ei.action.task || ei.msg, ei.action.steps || [], ei.action.priority || 1)
+            }
+          }
+        } else {
+          // Single or no execute intents — dispatch normally
+          for (const intent of intents) {
+            _dispatchAction(intent.action, intent.msg)
+          }
+        }
+
+        // Resolve all promises
+        batch.forEach(b => b.resolve())
+      } catch (err) {
+        console.error('[BatchChat] Error:', err.message)
+        // Fallback: process remaining one by one
+        for (const { msg, resolve, reject } of batch) {
+          try { await origChat(msg); resolve() } catch (e) { reject(e) }
+        }
       }
     }
+
     _chatProcessing = false
   }
 
@@ -1258,6 +1333,56 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
       _chatQueue.push({ msg, resolve, reject })
       _processChatQueue()
     })
+  }
+
+  // Talker-only call for batch mode: runs LLM, renders bubble, returns parsed action (no dispatch)
+  async function _chatSingleTalker(userMessage) {
+    addBubble('user', userMessage)
+    messages.push({ role: 'user', content: userMessage })
+
+    const bubble = createStreamBubble()
+    let fullReply = ''
+    let parsedAction = null
+
+    try {
+      const os = getOsState()
+      const result = await ai.think(userMessage, {
+        system: buildTalkerSystem(os),
+        stream: true,
+        history: messages.slice(-21, -1),
+        tools: [],
+        emit: (type, data) => {
+          if (type === 'token') {
+            const text = typeof data === 'string' ? data : (data?.text || '')
+            if (text) {
+              fullReply += text
+              bubble.textContent = cleanReply(fullReply)
+              document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight
+            }
+          }
+        }
+      })
+
+      if (!fullReply && result) {
+        if (typeof result === 'string') fullReply = result
+        else if (result?.answer != null) fullReply = result.answer
+        else if (result?.content != null) fullReply = typeof result.content === 'string' ? result.content : result.content.map(b => b.text || '').join('')
+        else fullReply = JSON.stringify(result)
+        bubble.textContent = fullReply
+      }
+
+      messages.push({ role: 'assistant', content: fullReply })
+      saveChat()
+
+      // Parse action but don't dispatch
+      const actions = parseAction(fullReply)
+      parsedAction = actions?.[0] || null
+      renderBubbleContent(bubble, parsedAction?.reply || cleanReply(fullReply))
+    } catch (err) {
+      if (!fullReply) bubble.textContent = `Error: ${err.message}`
+    }
+
+    return { reply: fullReply, action: parsedAction }
   }
 
   // Worker completion notification
