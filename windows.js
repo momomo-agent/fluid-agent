@@ -163,7 +163,7 @@ const WindowManager = (() => {
   function create({ type, title, x, y, width, height, data }) {
     const id = 'win-' + nextId++
     const w = document.createElement('div')
-    w.className = 'window'
+    w.className = `window window-${type}`
     w.id = id
     const { w: areaW, h: areaH } = getAreaSize()
     const ww = width || 500
@@ -551,6 +551,35 @@ const WindowManager = (() => {
         // Could add w.data.sortBy / w.data.sortDir for persistent sorting
       })
     })
+
+    // Finder background context menu
+    const finderMain = body.querySelector('.finder-main')
+    if (finderMain) {
+      finderMain.addEventListener('contextmenu', e => {
+        if (e.target.closest('.finder-list-row') || e.target.closest('.finder-item')) return
+        e.preventDefault()
+        e.stopPropagation()
+        if (!window.showContextMenu) return
+        window.showContextMenu(e.clientX, e.clientY, [
+          { icon: '📄', label: 'New File', action: () => {
+            const name = prompt('File name:', 'untitled.txt')
+            if (name) { VFS.writeFile(VFS.normPath(path + '/' + name), ''); renderFinder(w, body) }
+          }},
+          { icon: '📁', label: 'New Folder', action: () => {
+            const name = prompt('Folder name:', 'New Folder')
+            if (name) { VFS.mkdir(VFS.normPath(path + '/' + name)); renderFinder(w, body) }
+          }},
+          '---',
+          { icon: '📋', label: 'Copy Path', action: () => navigator.clipboard?.writeText(path) },
+          { icon: '💻', label: 'Open Terminal Here', action: () => { Shell.cd(path); WindowManager.openTerminal() } },
+          '---',
+          { icon: w.data.viewMode === 'grid' ? '☰' : '⊞', label: w.data.viewMode === 'grid' ? 'List View' : 'Grid View', action: () => {
+            w.data.viewMode = w.data.viewMode === 'grid' ? 'list' : 'grid'
+            renderFinder(w, body)
+          }},
+        ])
+      })
+    }
   }
 
   function formatSize(bytes) {
@@ -581,53 +610,50 @@ const WindowManager = (() => {
     // Welcome
     appendOutput(output, 'FluidOS Terminal v1.0\nType "help" for available commands.\n', 'output')
 
-    input.addEventListener('keydown', async e => {
-      if (e.key === 'Enter') {
-        const cmd = input.value
-        appendOutput(output, `user@fluid:${Shell.getCwd()}$ ${cmd}`, '')
-        if (cmd.trim()) {
-          // Built-in: say <text> — TTS via Voice
-          const sayMatch = cmd.trim().match(/^say\s+(.+)$/i)
-          if (sayMatch) {
-            const text = sayMatch[1]
-            if (Voice?.isEnabled()) {
-              appendOutput(output, `Speaking: "${text}"`, 'output')
-              Voice.speak(text)
-            } else {
-              appendOutput(output, 'Voice not enabled. Enable in Settings.', 'error')
-            }
-          } else if (cmd.trim() === 'listen') {
-            if (Voice?.isEnabled()) {
-              appendOutput(output, 'Listening... (click mic or type "listen" again to stop)', 'output')
-              Voice.toggleListening()
-            } else {
-              appendOutput(output, 'Voice not enabled. Enable in Settings.', 'error')
-            }
-          } else if (cmd.trim().match(/^play(\s+\d+)?$/i)) {
-            const m = cmd.trim().match(/^play(?:\s+(\d+))?$/i)
-            const idx = m[1] != null ? parseInt(m[1]) : null
-            WindowManager.openMusic()
-            EventBus.emit('music.control', { action: 'play', track: idx })
-            appendOutput(output, idx != null ? `Playing track ${idx}` : 'Playing music', 'output')
-          } else if (cmd.trim() === 'pause' || cmd.trim() === 'stop') {
-            EventBus.emit('music.control', { action: 'pause' })
-            appendOutput(output, 'Music paused', 'output')
-          } else if (cmd.trim() === 'next') {
-            EventBus.emit('music.control', { action: 'next' })
-            appendOutput(output, 'Next track', 'output')
-          } else {
-            const result = await Shell.execAsync(cmd)
-            if (result === '\x1bclear') {
-              output.innerHTML = ''
-            } else if (result) {
-              appendOutput(output, result, result.includes('not found') || result.includes('No such') ? 'error' : 'output')
-            }
-          }
+    let composing = false
+    input.addEventListener('compositionstart', () => { composing = true })
+    input.addEventListener('compositionend', () => { composing = false })
+
+    async function execCommand() {
+      const cmd = input.value
+      input.value = ''
+      histIdx = -1
+      appendOutput(output, `user@fluid:${Shell.getCwd()}$ ${cmd}`, '')
+      if (cmd.trim()) {
+        const sayMatch = cmd.trim().match(/^say\s+(.+)$/i)
+        if (sayMatch) {
+          if (Voice?.isEnabled()) { appendOutput(output, `Speaking: "${sayMatch[1]}"`, 'output'); Voice.speak(sayMatch[1]) }
+          else appendOutput(output, 'Voice not enabled. Enable in Settings.', 'error')
+        } else if (cmd.trim() === 'listen') {
+          if (Voice?.isEnabled()) { appendOutput(output, 'Listening...', 'output'); Voice.toggleListening() }
+          else appendOutput(output, 'Voice not enabled. Enable in Settings.', 'error')
+        } else if (cmd.trim().match(/^play(\s+\d+)?$/i)) {
+          const m = cmd.trim().match(/^play(?:\s+(\d+))?$/i)
+          const idx = m[1] != null ? parseInt(m[1]) : null
+          WindowManager.openMusic()
+          EventBus.emit('music.control', { action: 'play', track: idx })
+          appendOutput(output, idx != null ? `Playing track ${idx}` : 'Playing music', 'output')
+        } else if (cmd.trim() === 'pause' || cmd.trim() === 'stop') {
+          EventBus.emit('music.control', { action: 'pause' })
+          appendOutput(output, 'Music paused', 'output')
+        } else if (cmd.trim() === 'next') {
+          EventBus.emit('music.control', { action: 'next' })
+          appendOutput(output, 'Next track', 'output')
+        } else {
+          const result = await Shell.execAsync(cmd)
+          if (result === '\x1bclear') output.innerHTML = ''
+          else if (result) appendOutput(output, result, result.includes('not found') || result.includes('No such') ? 'error' : 'output')
         }
-        promptEl.textContent = `user@fluid:${Shell.getCwd()}$ `
-        input.value = ''
-        histIdx = -1
-        body.querySelector('.terminal-body').scrollTop = body.querySelector('.terminal-body').scrollHeight
+      }
+      promptEl.textContent = `user@fluid:${Shell.getCwd()}$ `
+      body.querySelector('.terminal-body').scrollTop = body.querySelector('.terminal-body').scrollHeight
+    }
+
+    input.addEventListener('keydown', async e => {
+      if (composing) return // IME composing, don't intercept
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        await execCommand()
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         const hist = Shell.getHistory()
@@ -643,6 +669,25 @@ const WindowManager = (() => {
     // Focus input on click
     body.addEventListener('click', () => input.focus())
     setTimeout(() => input.focus(), 50)
+
+    // Terminal context menu
+    body.querySelector('.terminal-body').addEventListener('contextmenu', e => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!window.showContextMenu) return
+      const sel = window.getSelection()?.toString()
+      const items = []
+      if (sel) items.push({ icon: '📋', label: 'Copy', action: () => navigator.clipboard?.writeText(sel) })
+      items.push({ icon: '📄', label: 'Paste', action: async () => { const t = await navigator.clipboard?.readText(); if (t) input.value += t; input.focus() } })
+      items.push('---')
+      items.push({ icon: '🧹', label: 'Clear', action: () => { output.innerHTML = '' } })
+      items.push({ icon: '🔍', label: 'Search History', action: () => {
+        const hist = Shell.getHistory()
+        if (hist.length) appendOutput(output, '\n--- History ---\n' + hist.slice(-20).map((h,i) => `${hist.length - 20 + i}: ${h}`).join('\n'), 'output')
+        else appendOutput(output, 'No history', 'output')
+      }})
+      window.showContextMenu(e.clientX, e.clientY, items)
+    })
   }
 
   function appendOutput(container, text, cls) {
@@ -765,6 +810,28 @@ const WindowManager = (() => {
         if (toggle) toggle.click()
       })
     }
+
+    // Editor context menu
+    body.querySelector('.editor-body').addEventListener('contextmenu', e => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!window.showContextMenu) return
+      const sel = window.getSelection()?.toString()
+      const items = []
+      if (sel) {
+        items.push({ icon: '\u{1f4cb}', label: 'Copy', action: () => navigator.clipboard?.writeText(sel) })
+        items.push({ icon: '\u{2702}', label: 'Cut', action: () => { navigator.clipboard?.writeText(sel); document.execCommand('delete') } })
+      }
+      items.push({ icon: '\u{1f4c4}', label: 'Paste', action: async () => {
+        const t = await navigator.clipboard?.readText()
+        if (t && mode === 'edit') { textarea.focus(); document.execCommand('insertText', false, t) }
+      }})
+      items.push('---')
+      items.push({ icon: '\u{1f4be}', label: 'Save', action: () => { VFS.writeFile(path, textarea.value); if (preview && mode === 'preview') preview.innerHTML = parseMd(textarea.value) } })
+      items.push({ icon: '\u{1f4c2}', label: 'Reveal in Finder', action: () => WindowManager.openFinder(path.split('/').slice(0, -1).join('/') || '/') })
+      items.push({ icon: '\u{1f4cb}', label: 'Copy Path', action: () => navigator.clipboard?.writeText(path) })
+      window.showContextMenu(e.clientX, e.clientY, items)
+    })
   }
 
   function escapeHtml(s) {
