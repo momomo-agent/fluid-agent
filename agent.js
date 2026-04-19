@@ -533,16 +533,7 @@ Know the difference:
 - "Find X in my files" → Reply first ("Let me look"), then execute in background.
 
 You are an operating system with these capabilities (Workers use these tools to execute tasks):
-- **Files & Code**: read/write/list files, run shell commands, create apps (HTML/CSS/JS)
-- **Music**: search_music (NetEase for Chinese songs with full MP3, iTunes for international) → play in Music app. DO NOT open browser for music.
-- **Weather**: get_weather (Open-Meteo API, no key needed), get_location (browser GPS)
-- **Maps**: map tool (MapLibre) — open map, add markers, show routes. DO NOT open Google Maps in browser.
-- **Video**: video player for URLs
-- **Web**: web_search (Tavily), web_fetch, browser (only for actual web browsing)
-- **Knowledge**: get_wikipedia, get_stock, search_movie/search_tv (TMDB), search_podcast
-- **Math**: calculate
-- **Apps**: create custom apps on the fly (HTML/CSS/JS → sandboxed window)
-- **Wallpaper**: set_wallpaper — presets (aurora/sunset/ocean/forest/lavender/midnight/rose/sky), CSS gradients, or image URLs
+${Capabilities.describe()}
 
 IMPORTANT: Use native tools, not the browser. Music → search_music + music tool. Weather → get_weather. Maps → map tool. Only use browser when the user explicitly wants to browse a website.
 
@@ -648,161 +639,13 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     setWorkerStatus('🔄 Working...')
     showActivity(`Starting: ${taskDescription.slice(0, 50)}...`)
 
-    const toolHandlers = {
-      fs: ({ action, path, content }) => {
-        switch (action) {
-          case 'write': VFS.mkdir(path.split('/').slice(0, -1).join('/')); VFS.writeFile(path, content); showActivity(`Created ${path.split('/').pop()}`); return { success: true }
-          case 'read': { const c = VFS.readFile(path); return c !== null ? { content: c } : { error: `Not found: ${path}` } }
-          case 'list': { const items = VFS.ls(path); return items ? { items } : { error: `Not found: ${path}` } }
-          case 'mkdir': VFS.mkdir(path); showActivity(`Created dir ${path}`); return { success: true }
-          default: return { error: `Unknown fs action: ${action}` }
-        }
-      },
-      run_command: async ({ command }) => {
-        showActivity(`$ ${command}`)
-        return { output: await Shell.execAsync(command) || '(no output)' }
-      },
-      open: ({ target, path, url, src, title, lat, lng, zoom }) => {
-        switch (target) {
-          case 'finder': EventBus.emit('window.open', { type: 'finder', path }); showActivity(`Finder: ${path}`); break
-          case 'editor': EventBus.emit('window.open', { type: 'editor', path }); showActivity(`Opened ${path.split('/').pop()}`); break
-          case 'terminal': EventBus.emit('window.open', { type: 'terminal' }); showActivity('Opened Terminal'); break
-          case 'image': EventBus.emit('window.open', { type: 'image', src: src || url, title }); showActivity(`Opened image: ${title || 'image'}`); break
-          case 'browser': EventBus.emit('window.open', { type: 'browser', url }); showActivity(`🌐 Browser: ${url || 'home'}`); break
-          case 'map': EventBus.emit('window.open', { type: 'map', lat, lng, zoom }); showActivity(`🗺️ Map`); break
-          case 'music': EventBus.emit('window.open', { type: 'music' }); showActivity('🎵 Music'); break
-          default: return { error: `Unknown target: ${target}` }
-        }
-        return { success: true }
-      },
-      window: ({ action, title, x, y, width, height, layout }) => {
-        switch (action) {
-          case 'close': WindowManager.closeByTitle(title); showActivity(`Closed: ${title}`); break
-          case 'move': WindowManager.moveWindow(title, x, y); showActivity(`Moved: ${title}`); break
-          case 'resize': WindowManager.resizeWindow(title, width, height); showActivity(`Resized: ${title}`); break
-          case 'minimize': WindowManager.minimizeByTitle(title); showActivity(`Minimized: ${title}`); break
-          case 'maximize': WindowManager.maximizeByTitle(title); showActivity(`Maximized: ${title}`); break
-          case 'restore': WindowManager.unminimizeByTitle(title); showActivity(`Restored: ${title}`); break
-          case 'focus': WindowManager.focusByTitle(title); showActivity(`Focused: ${title}`); break
-          case 'list': { const wins = []; for (const [id, w] of WindowManager.getState()) wins.push({ id, title: w.title || w.type, type: w.type, minimized: w.el?.classList.contains('minimized') }); return { windows: wins } }
-          case 'tile': WindowManager.tileWindows(layout || 'grid'); showActivity(`Tiled: ${layout || 'grid'}`); break
-          default: return { error: `Unknown window action: ${action}` }
-        }
-        return { success: true }
-      },
-      set_wallpaper: ({ css, url, preset }) => {
-        const el = document.getElementById('desktop-wallpaper')
-        if (!el) return { error: 'No wallpaper element' }
-        if (url) {
-          el.style.background = `url(${url}) center/cover no-repeat`
-        } else if (css) {
-          el.style.background = css
-        } else if (preset) {
-          const presets = {
-            aurora: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)',
-            sunset: 'linear-gradient(135deg, #ff6b6b 0%, #ffa07a 30%, #ffd700 60%, #ff4500 100%)',
-            ocean: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)',
-            forest: 'linear-gradient(135deg, #134e5e 0%, #71b280 50%, #d4fc79 100%)',
-            lavender: 'linear-gradient(135deg, #e8f0fe 0%, #f0e6ff 30%, #e6f7f0 60%, #fef3e0 100%)',
-            midnight: 'linear-gradient(135deg, #0a0a2e 0%, #1a1a4e 40%, #2d1b69 70%, #0a0a2e 100%)',
-            rose: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 50%, #ff9a9e 100%)',
-            sky: 'radial-gradient(ellipse at 20% 50%, rgba(120,180,255,0.25) 0%, transparent 50%), radial-gradient(ellipse at 80% 20%, rgba(200,150,255,0.2) 0%, transparent 50%), radial-gradient(ellipse at 50% 80%, rgba(100,220,200,0.15) 0%, transparent 50%), linear-gradient(135deg, #e8f0fe 0%, #f0e6ff 30%, #e6f7f0 60%, #fef3e0 100%)',
-          }
-          el.style.background = presets[preset] || presets.sky
-          if (!presets[preset]) return { error: `Unknown preset. Available: ${Object.keys(presets).join(', ')}` }
-        }
-        showActivity(`🎨 Wallpaper changed`)
-        return { success: true }
-      },
-      music: ({ action, track, title, artist, style, url, artwork }) => {
-        EventBus.emit('window.open', { type: 'music' })
-        if (action === 'add') {
-          const result = WindowManager.musicAddTrack({ title, artist, style, url, artwork })
-          if (result.error) return result
-          showActivity(`🎵 Added: ${title}`)
-          return { success: true, trackIndex: result.index, message: `Added "${title}" to playlist` }
-        }
-        if (action === 'add_and_play') {
-          const result = WindowManager.musicAddTrack({ title, artist, style, url, artwork })
-          if (result.error) return result
-          EventBus.emit('music.control', { action: 'play', track: result.index })
-          showActivity(`🎵 Playing: ${title}`)
-          return { success: true, trackIndex: result.index }
-        }
-        EventBus.emit('music.control', { action, track })
-        showActivity(`🎵 Music: ${action}${track != null ? ' #' + track : ''}`)
-        return { success: true }
-      },
-      browser: ({ action, url }) => {
-        switch (action) {
-          case 'open': EventBus.emit('window.open', { type: 'browser', url }); showActivity(`🌐 Browser: ${url || 'home'}`); break
-          case 'navigate': EventBus.emit('browser.control', { action: 'navigate', url }); showActivity(`🌐 Navigate: ${url}`); break
-          case 'back': EventBus.emit('browser.control', { action: 'back' }); break
-          default: return { error: `Unknown browser action: ${action}` }
-        }
-        return { success: true }
-      },
-      browser_control: ({ action, ref, text, submit, selector, code, url, x, y }) => {
-        // Control the active browser iframe via postMessage bridge
-        return new Promise((resolve) => {
-          const iframes = document.querySelectorAll('.browser-content iframe')
-          const iframe = iframes[iframes.length - 1] // latest browser
-          if (!iframe || !iframe.contentWindow) { resolve({ error: 'No active browser iframe' }); return }
-          const id = Date.now() + Math.random()
-          const timeout = setTimeout(() => { window.removeEventListener('message', handler); resolve({ error: 'Bridge timeout (5s)' }) }, 5000)
-          function handler(event) {
-            if (event.data?.__bridgeResponse && event.data.__id === id) {
-              clearTimeout(timeout)
-              window.removeEventListener('message', handler)
-              resolve(event.data)
-            }
-          }
-          window.addEventListener('message', handler)
-          iframe.contentWindow.postMessage({ __bridge: true, __id: id, action, ref, text, submit, selector, code, url, x, y }, '*')
-        })
-      },
-      map: ({ action, lat, lng, label, color, zoom, from_lat, from_lng, to_lat, to_lng }) => {
-        switch (action) {
-          case 'open': EventBus.emit('window.open', { type: 'map', lat, lng, zoom }); showActivity(`🗺️ Map`); break
-          case 'marker': EventBus.emit('window.open', { type: 'map' }); WindowManager.mapAddMarker(lat, lng, label, color); showActivity(`📍 Marker: ${label || `${lat}, ${lng}`}`); break
-          case 'clear_markers': WindowManager.mapClearMarkers(); break
-          case 'route': EventBus.emit('window.open', { type: 'map' }); WindowManager.mapShowRoute({ lat: from_lat, lng: from_lng }, { lat: to_lat, lng: to_lng }); showActivity(`🚗 Route`); break
-          case 'clear_route': WindowManager.mapClearRoute(); break
-          default: return { error: `Unknown map action: ${action}` }
-        }
-        return { success: true }
-      },
-      video: ({ action, url, title }) => {
-        switch (action) {
-          case 'play': if (url) { EventBus.emit('window.open', { type: 'video', url, title }); showActivity(`🎬 Video: ${title || 'player'}`) } else { EventBus.emit('video.control', { action: 'play' }) }; break
-          case 'pause': EventBus.emit('video.control', { action: 'pause' }); break
-          case 'fullscreen': EventBus.emit('video.control', { action: 'fullscreen' }); break
-          default: return { error: `Unknown video action: ${action}` }
-        }
-        return { success: true }
-      },
-      app: ({ action, name, html, css, js, icon, width, height, description }) => {
-        switch (action) {
-          case 'create': case 'update': {
-            // File-driven: if no html provided, load from /home/user/apps/<name>/
-            let appHtml = html, appCss = css, appJs = js
-            if (!appHtml) {
-              const appDir = `/home/user/apps/${name}`
-              if (VFS.isFile(`${appDir}/index.html`)) appHtml = VFS.readFile(`${appDir}/index.html`)
-              if (VFS.isFile(`${appDir}/style.css`)) appCss = VFS.readFile(`${appDir}/style.css`)
-              if (VFS.isFile(`${appDir}/script.js`)) appJs = VFS.readFile(`${appDir}/script.js`)
-              if (!appHtml) return { error: `No html provided and no index.html found at ${appDir}/. Write files first with fs tool, then call app create.` }
-            }
-            WindowManager.openApp(name, appHtml, appCss || '', appJs || '', { icon, width, height, description })
-            showActivity(`💻 ${action === 'create' ? 'Created' : 'Updated'} app: ${name}`)
-            return { success: true, message: `App "${name}" ${action === 'create' ? 'created and opened' : 'updated'}. It's now installed in the dock.` }
-          }
-          case 'uninstall': { const ok = WindowManager.uninstallApp?.(name); if (ok) { showActivity(`🗑️ Uninstalled: ${name}`); return { success: true } } return { error: `App "${name}" not found` } }
-          case 'list': return { apps: WindowManager.getInstalledApps() }
-          default: return { error: `Unknown app action: ${action}` }
-        }
-      },
-      skill: ({ action, name, description, icon, schema, handler }) => {
+    // --- Capability Registry: build tool handlers & defs from registered capabilities ---
+    const capCtx = { VFS, Shell, WindowManager, EventBus, showActivity, steps, task, blackboard }
+
+    // Wire up special handlers that need local scope
+    const skillCap = Capabilities.get('skill')
+    if (skillCap && !skillCap.handler) {
+      skillCap.handler = ({ action, name, description, icon, schema, handler }, ctx) => {
         switch (action) {
           case 'create': {
             const dir = `/system/skills/${name}`
@@ -813,7 +656,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
             VFS.writeFile(`${dir}/SKILL.md`, md)
             const parsed = parseSkillMd(md)
             if (parsed) customSkills.set(name, parsed)
-            showActivity(`🧩 Skill created: ${name}`)
+            ctx.showActivity(`🧩 Skill created: ${name}`)
             return { success: true, message: `Skill "${name}" created and loaded. Available as tool "skill_${name}".` }
           }
           case 'list': {
@@ -824,71 +667,22 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
             return { skills }
           }
           case 'read': { const p = `/system/skills/${name}/SKILL.md`; if (!VFS.isFile(p)) return { error: `Skill "${name}" not found` }; return { content: VFS.readFile(p) } }
-          case 'delete': { const dir = `/system/skills/${name}`; if (!VFS.isDir(dir)) return { error: `Skill "${name}" not found` }; VFS.rm(`${dir}/SKILL.md`); VFS.rm(dir); customSkills.delete(name); showActivity(`🗑️ Skill deleted: ${name}`); return { success: true } }
+          case 'delete': { const dir = `/system/skills/${name}`; if (!VFS.isDir(dir)) return { error: `Skill "${name}" not found` }; VFS.rm(`${dir}/SKILL.md`); VFS.rm(dir); customSkills.delete(name); ctx.showActivity(`🗑️ Skill deleted: ${name}`); return { success: true } }
           default: return { error: `Unknown skill action: ${action}` }
         }
-      },
-      update_progress: ({ step_index }) => {
-        if (steps[step_index]) { steps[step_index].status = 'done'; WindowManager.updateTask(task) }
-        showActivity(`✅ Step ${step_index + 1} done`)
-        return { success: true }
-      },
-      plan_steps: ({ planned }) => {
-        if (!Array.isArray(planned) || !planned.length) return { error: 'planned must be non-empty array of strings' }
-        steps.length = 0
-        planned.forEach(s => steps.push({ text: s, status: 'pending' }))
-        task.steps = steps
-        WindowManager.updateTask(task)
-        return { success: true, steps: planned }
-      },
-      done: async ({ summary }) => {
-        task.status = 'done'
-        blackboard.currentTask.status = 'done'
-        steps.forEach(s => { if (s.status !== 'done' && s.status !== 'error') s.status = 'done' })
-        WindowManager.updateTask(task)
-        return { done: true, summary }
-      },
-      web_search: async ({ query, search_depth }) => {
-        showActivity(`🔍 Searching: ${query.slice(0, 40)}...`)
-        const settings = window._store ? (await window._store.get('settings')) || {} : {}
-        const key = settings.tavilyKey
-        if (!key) return { error: 'No Tavily API key configured. Open Settings to add one.' }
-        try {
-          const res = await fetch('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key, query, search_depth: search_depth || 'basic', max_results: 5 }) })
-          const data = await res.json()
-          return { results: (data.results || []).map(r => ({ title: r.title, url: r.url, content: r.content?.slice(0, 500) })), answer: data.answer }
-        } catch (err) { return { error: err.message } }
-      },
-      web_fetch: async ({ url, max_chars }) => {
-        showActivity(`🌐 Fetching: ${url.slice(0, 40)}...`)
-        try {
-          let text
-          try { const res = await fetch(url); text = await res.text() } catch { const res = await fetch('https://proxy.link2web.site', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, mode: 'llm' }) }); const result = await res.json(); text = result.body || result.text || '' }
-          const limit = max_chars || 5000
-          return { content: text.slice(0, limit), truncated: text.length > limit }
-        } catch (err) { return { error: err.message } }
-      },
+      }
     }
 
-    const toolDefs = {
-      fs: { desc: 'File system operations: write, read, list, or mkdir files/directories', schema: { type: 'object', properties: { action: { type: 'string', enum: ['write', 'read', 'list', 'mkdir'], description: 'write=create/overwrite file, read=read file, list=list directory, mkdir=create directory' }, path: { type: 'string' }, content: { type: 'string', description: 'File content (for write)' } }, required: ['action', 'path'] } },
-      run_command: { desc: 'Run a shell command and return output', schema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
-      open: { desc: 'Open a built-in app: finder, editor, terminal, image, browser, map, music', schema: { type: 'object', properties: { target: { type: 'string', enum: ['finder', 'editor', 'terminal', 'image', 'browser', 'map', 'music'] }, path: { type: 'string', description: 'For finder/editor' }, url: { type: 'string', description: 'For browser/image' }, src: { type: 'string', description: 'For image' }, title: { type: 'string' }, lat: { type: 'number' }, lng: { type: 'number' }, zoom: { type: 'number' } }, required: ['target'] } },
-      window: { desc: 'Window management: close, move, resize, minimize, maximize, restore, focus, list, tile. Positions/sizes are normalized 0-1 (fraction of desktop).', schema: { type: 'object', properties: { action: { type: 'string', enum: ['close', 'move', 'resize', 'minimize', 'maximize', 'restore', 'focus', 'list', 'tile'] }, title: { type: 'string', description: 'Window title (for most actions)' }, x: { type: 'number', description: '0-1 normalized x position' }, y: { type: 'number', description: '0-1 normalized y position' }, width: { type: 'number', description: '0-1 normalized width' }, height: { type: 'number', description: '0-1 normalized height' }, layout: { type: 'string', enum: ['grid', 'horizontal', 'vertical'], description: 'For tile action' } }, required: ['action'] } },
-      set_wallpaper: { desc: 'Change desktop wallpaper with preset, CSS gradient, or image URL', schema: { type: 'object', properties: { preset: { type: 'string', enum: ['aurora', 'sunset', 'ocean', 'forest', 'lavender', 'midnight', 'rose', 'sky'] }, css: { type: 'string' }, url: { type: 'string' } } } },
-      music: { desc: 'Control music player. Actions: play, pause, next, prev, add (add track to playlist), add_and_play (add and immediately play). For add/add_and_play: provide title, artist, and optionally url (external audio URL like MP3) and artwork (album cover image URL). If no url, a synth track is generated using style.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'next', 'prev', 'add', 'add_and_play'] }, track: { type: 'number', description: '0-based track index for play' }, title: { type: 'string', description: 'Track title for add' }, artist: { type: 'string', description: 'Artist name for add' }, style: { type: 'string', enum: ['dreamy', 'bright', 'gentle', 'moody', 'playful'], description: 'Synth style for generated track (ignored if url provided)' }, url: { type: 'string', description: 'External audio URL (MP3) for real music playback' }, artwork: { type: 'string', description: 'Album cover image URL' } }, required: ['action'] } },
-      browser: { desc: 'Browser control: open, navigate to URL, go back', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'navigate', 'back'] }, url: { type: 'string' } }, required: ['action'] } },
-      browser_control: { desc: 'Control the active browser page (like Playwright). Actions: snapshot (list interactive elements with refs), click @ref, type @ref text, extract (get page text), eval (run JS), scroll, highlight @ref, navigate url, ping.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['snapshot', 'click', 'type', 'extract', 'eval', 'scroll', 'highlight', 'navigate', 'ping'] }, ref: { type: 'string', description: '@e1, @e2 etc from snapshot' }, text: { type: 'string' }, submit: { type: 'boolean' }, selector: { type: 'string' }, code: { type: 'string' }, url: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['action'] } },
-      map: { desc: 'Map operations: open, add marker, clear markers, show route, clear route', schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'marker', 'clear_markers', 'route', 'clear_route'] }, lat: { type: 'number' }, lng: { type: 'number' }, zoom: { type: 'number' }, label: { type: 'string' }, color: { type: 'string', enum: ['red', 'blue', 'green', 'orange', 'purple', 'pink', 'yellow'] }, from_lat: { type: 'number' }, from_lng: { type: 'number' }, to_lat: { type: 'number' }, to_lng: { type: 'number' } }, required: ['action'] } },
-      video: { desc: 'Video player: play URL, pause, fullscreen', schema: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'fullscreen'] }, url: { type: 'string', description: 'Video URL (for play)' }, title: { type: 'string' } }, required: ['action'] } },
-      app: { desc: 'Manage generative apps. PREFERRED workflow: 1) Write files to /home/user/apps/<name>/ using fs tool (index.html, style.css, script.js), 2) Call app create with just name+width+height. This avoids token limits. You can also pass html/css/js inline for tiny apps. Size guide: calculator~320x420, text tool~500x400, dashboard~700x500, game~600x500.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'uninstall', 'list'] }, name: { type: 'string' }, html: { type: 'string', description: 'Optional if files exist at /home/user/apps/<name>/' }, css: { type: 'string' }, js: { type: 'string' }, icon: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, description: { type: 'string' } }, required: ['action'] } },
-      skill: { desc: 'Manage skills (self-evolving tools): create, list, read, delete. Skills persist across sessions.', schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'list', 'read', 'delete'] }, name: { type: 'string' }, description: { type: 'string' }, icon: { type: 'string' }, schema: { type: 'object' }, handler: { type: 'string', description: 'JS function body. Receives (params, VFS, Shell, WindowManager).' } }, required: ['action'] } },
-      update_progress: { desc: 'Mark a step as done by index (0-based)', schema: { type: 'object', properties: { step_index: { type: 'number' } }, required: ['step_index'] } },
-      plan_steps: { desc: 'Set your execution plan (call first if no steps provided)', schema: { type: 'object', properties: { planned: { type: 'array', items: { type: 'string' } } }, required: ['planned'] } },
-      done: { desc: 'Signal task completion with summary', schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
-      web_search: { desc: 'Search the web using Tavily for real-world facts and current events', schema: { type: 'object', properties: { query: { type: 'string' }, search_depth: { type: 'string', enum: ['basic', 'advanced'] } }, required: ['query'] } },
-      web_fetch: { desc: 'Fetch and read web page content from a URL', schema: { type: 'object', properties: { url: { type: 'string' }, max_chars: { type: 'number' } }, required: ['url'] } },
+    // Build toolHandlers from registry — each handler gets capCtx injected
+    const toolHandlers = {}
+    for (const cap of Capabilities.list()) {
+      if (cap.handler) {
+        toolHandlers[cap.name] = (params) => cap.handler(params, capCtx)
+      }
     }
+
+    // Build toolDefs from registry
+    const toolDefs = Capabilities.getToolDefs()
 
     // --- Merge External Skills (from Visual Talk) ---
     const _getConfig = () => {
@@ -905,13 +699,11 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
     if (steps.length > 0) { steps[0].status = 'running'; WindowManager.updateTask(task) }
 
     // --- Tool Search: deferred tool loading ---
-    const alwaysAvailable = new Set(['fs', 'run_command', 'update_progress', 'plan_steps', 'done', 'search_tools'])
+    const alwaysAvailable = new Set(Capabilities.getAlwaysAvailable())
     const loadedTools = new Set([...alwaysAvailable])
-    const toolCatalog = Object.fromEntries(
-      Object.entries(toolDefs).map(([name, { desc }]) => [name, desc])
-    )
+    const toolCatalog = Capabilities.catalog()
 
-    // search_tools meta-tool
+    // search_tools meta-tool: wired up here because it needs loadedTools closure
     toolHandlers.search_tools = ({ query, names }) => {
       if (names && Array.isArray(names)) {
         const loaded = []
@@ -920,25 +712,15 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
         }
         return { loaded, available: loaded.length > 0 }
       }
-      const q = (query || '').toLowerCase()
-      const matches = Object.entries(toolCatalog)
-        .filter(([name, desc]) => name.includes(q) || desc.toLowerCase().includes(q))
-        .map(([name, desc]) => ({ name, desc, loaded: loadedTools.has(name) }))
-        .slice(0, 10)
-      return { results: matches, hint: 'Call search_tools with names:[...] to load specific tools' }
+      if (query) {
+        const q = query.toLowerCase()
+        const matches = Object.entries(toolCatalog)
+          .filter(([name, desc]) => name.toLowerCase().includes(q) || desc.toLowerCase().includes(q))
+          .map(([name, desc]) => ({ name, description: desc, loaded: loadedTools.has(name) }))
+        return { results: matches, hint: 'Call search_tools with names:[...] to load specific tools' }
+      }
+      return { error: 'Provide query or names' }
     }
-    toolDefs.search_tools = {
-      desc: 'Load tools by name. All tools are listed in the system prompt — call this with the exact names you need. Tools stay loaded for the rest of this task.',
-      schema: { type: 'object', properties: {
-        query: { type: 'string', description: 'Keyword to search tool names/descriptions' },
-        names: { type: 'array', items: { type: 'string' }, description: 'Exact tool names to load' }
-      }}
-    }
-
-    const extendedToolList = Object.entries(toolCatalog)
-      .filter(([name]) => !alwaysAvailable.has(name))
-      .map(([name, desc]) => `  - ${name}: ${desc}`)
-      .join('\n')
 
     // Merge custom skill tools
     const skillTools = getSkillTools()
@@ -981,6 +763,11 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
 
     // --- Turn Loop: ai.step() with Dispatcher checkpoints ---
     const os = getOsState()
+    const alwaysNames = Capabilities.getAlwaysAvailable().join(', ')
+    const extendedToolList = Object.entries(toolCatalog)
+      .filter(([name]) => !alwaysAvailable.has(name))
+      .map(([name, desc]) => `  - ${name}: ${desc}`)
+      .join('\n')
     const workerSystem = `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
 
 Current OS state:
@@ -994,7 +781,7 @@ Planned steps:
 ${steps.length ? steps.map((s, i) => `${i}. ${s.text}`).join('\n') : '(none — call plan_steps first to set your execution plan)'}
 
 ## Tool System
-Always available: fs, run_command, update_progress, plan_steps, done, search_tools.
+Always available: ${alwaysNames}.
 
 All other tools — call search_tools({names: [...]}) to activate:
 ${extendedToolList}
