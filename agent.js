@@ -89,7 +89,10 @@ const Agent = (() => {
       try {
         const md = VFS.readFile(skillPath)
         const parsed = parseSkillMd(md)
-        if (parsed) customSkills.set(entry.name, parsed)
+        if (parsed) {
+          customSkills.set(entry.name, parsed)
+          registerSkillCapability(entry.name, parsed)
+        }
       } catch (e) { /* skip broken skills */ }
     }
     if (customSkills.size > 0) showActivity(`🧩 Loaded ${customSkills.size} skill${customSkills.size > 1 ? 's' : ''}`)
@@ -118,25 +121,32 @@ const Agent = (() => {
     }
   }
 
-  function getSkillTools() {
-    // Convert custom skills into tool definitions + handlers
-    const tools = {}
-    const handlers = {}
-    for (const [name, skill] of customSkills) {
-      tools[`skill_${name}`] = { desc: `[Skill] ${skill.description}`, schema: skill.schema }
-      handlers[`skill_${name}`] = async (params) => {
+  // Dynamic registration: skill → Capability
+  function registerSkillCapability(name, skill) {
+    const capName = `skill_${name}`
+    Capabilities.register(capName, {
+      description: `[Skill] ${skill.description}`,
+      icon: skill.icon || '🧩',
+      category: 'Skills',
+      schema: skill.schema,
+      handler: async (params, ctx) => {
         try {
           const fn = buildSkillHandler(skill.handler_js)
-          const result = await fn(params, VFS, Shell, WindowManager)
-          showActivity(`🧩 ${name}: done`)
+          const result = await fn(params, ctx.VFS, ctx.Shell, ctx.WindowManager)
+          ctx.showActivity(`🧩 ${name}: done`)
           return result || { success: true }
         } catch (e) {
           return { error: e.message }
         }
       }
-    }
-    return { tools, handlers }
+    })
   }
+
+  function unregisterSkillCapability(name) {
+    Capabilities.unregister(`skill_${name}`)
+  }
+
+  // getSkillTools() removed — skills register directly as Capabilities
 
   function configure(provider, apiKey, model, baseUrl, storeInstance) {
     const opts = { provider, apiKey }
@@ -655,9 +665,12 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
             md += `\n## Handler\n\`\`\`js\n${handler}\n\`\`\`\n`
             VFS.writeFile(`${dir}/SKILL.md`, md)
             const parsed = parseSkillMd(md)
-            if (parsed) customSkills.set(name, parsed)
+            if (parsed) {
+              customSkills.set(name, parsed)
+              registerSkillCapability(name, parsed)
+            }
             ctx.showActivity(`🧩 Skill created: ${name}`)
-            return { success: true, message: `Skill "${name}" created and loaded. Available as tool "skill_${name}".` }
+            return { success: true, message: `Skill "${name}" created and registered as capability. Available as tool "skill_${name}".` }
           }
           case 'list': {
             const skills = []
@@ -667,7 +680,7 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
             return { skills }
           }
           case 'read': { const p = `/system/skills/${name}/SKILL.md`; if (!VFS.isFile(p)) return { error: `Skill "${name}" not found` }; return { content: VFS.readFile(p) } }
-          case 'delete': { const dir = `/system/skills/${name}`; if (!VFS.isDir(dir)) return { error: `Skill "${name}" not found` }; VFS.rm(`${dir}/SKILL.md`); VFS.rm(dir); customSkills.delete(name); ctx.showActivity(`🗑️ Skill deleted: ${name}`); return { success: true } }
+          case 'delete': { const dir = `/system/skills/${name}`; if (!VFS.isDir(dir)) return { error: `Skill "${name}" not found` }; VFS.rm(`${dir}/SKILL.md`); VFS.rm(dir); customSkills.delete(name); unregisterSkillCapability(name); ctx.showActivity(`🗑️ Skill deleted: ${name}`); return { success: true } }
           default: return { error: `Unknown skill action: ${action}` }
         }
       }
@@ -722,13 +735,10 @@ For conversation, questions, opinions, brainstorming — just reply normally. No
       return { error: 'Provide query or names' }
     }
 
-    // Merge custom skill tools
-    const skillTools = getSkillTools()
-    const allToolDefs = { ...toolDefs, ...skillTools.tools }
-    const allHandlers = { ...toolHandlers, ...skillTools.handlers }
-    for (const [name, { desc }] of Object.entries(skillTools.tools)) {
-      toolCatalog[name] = desc
-    }
+    // Skills are already registered as capabilities via registerSkillCapability()
+    // Just build the final merged defs/handlers
+    const allToolDefs = toolDefs
+    const allHandlers = toolHandlers
 
     function makeExecutor(name) {
       return async (params) => {
