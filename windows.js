@@ -9,16 +9,12 @@ const WindowManager = (() => {
   let _activeDrag = null   // { el, id, offsetX, offsetY }
   let _activeResize = null // { el, startX, startY, startW, startH }
 
-  // --- Full-screen overlay to prevent iframe gesture theft during drag/resize ---
-  let _dragOverlay = null
-  function showDragOverlay() {
-    if (_dragOverlay) return
-    _dragOverlay = document.createElement('div')
-    _dragOverlay.style.cssText = 'position:fixed;inset:0;z-index:999999;cursor:inherit;'
-    document.body.appendChild(_dragOverlay)
+  // --- Disable iframe pointer events during drag/resize to prevent gesture theft ---
+  function disableIframePointers() {
+    document.querySelectorAll('.window-body iframe').forEach(f => f.style.pointerEvents = 'none')
   }
-  function hideDragOverlay() {
-    if (_dragOverlay) { _dragOverlay.remove(); _dragOverlay = null }
+  function enableIframePointers() {
+    document.querySelectorAll('.window-body iframe').forEach(f => f.style.pointerEvents = '')
   }
 
   document.addEventListener('mousemove', e => {
@@ -57,7 +53,7 @@ const WindowManager = (() => {
       const win = windows.get(_activeDrag.id)
       if (win) win._norm = readNorm(_activeDrag.el)
       _activeDrag = null
-      hideDragOverlay()
+      enableIframePointers()
     }
     if (_activeResize) {
       const body = _activeResize.el.querySelector('.window-body')
@@ -67,7 +63,7 @@ const WindowManager = (() => {
       const win = windows.get(resId)
       if (win) win._norm = readNorm(_activeResize.el)
       _activeResize = null
-      hideDragOverlay()
+      enableIframePointers()
     }
   })
 
@@ -212,7 +208,7 @@ const WindowManager = (() => {
     titlebar.addEventListener('mousedown', e => {
       if (e.target.classList.contains('window-dot')) return
       _activeDrag = { el: w, id, offsetX: e.clientX - w.offsetLeft, offsetY: e.clientY - w.offsetTop }
-      showDragOverlay()
+      disableIframePointers()
       focus(id)
       const body = w.querySelector('.window-body')
       if (body) body.style.pointerEvents = 'none'
@@ -241,7 +237,7 @@ const WindowManager = (() => {
       e.stopPropagation()
       e.preventDefault()
       _activeResize = { el: w, startX: e.clientX, startY: e.clientY, startW: w.offsetWidth, startH: w.offsetHeight }
-      showDragOverlay()
+      disableIframePointers()
       const body = w.querySelector('.window-body')
       if (body) body.style.pointerEvents = 'none'
     })
