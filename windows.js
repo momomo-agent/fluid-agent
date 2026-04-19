@@ -92,13 +92,21 @@ const WindowManager = (() => {
     return toNorm({ x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight })
   }
 
-  // Reflow all windows on resize
-  window.addEventListener('resize', () => {
+  // Reflow all windows on desktop-area resize
+  const _resizeObserver = new ResizeObserver(() => {
     for (const [, win] of windows) {
       if (win.el.classList.contains('minimized') || win.el.classList.contains('fullscreen')) continue
-      if (win._norm) applyPx(win.el, win._norm)
+      if (!win._norm) win._norm = readNorm(win.el)
+      applyPx(win.el, win._norm)
     }
   })
+  // Observe once area exists (deferred if needed)
+  function _observeArea() {
+    const el = document.getElementById('desktop-area')
+    if (el) _resizeObserver.observe(el)
+    else requestAnimationFrame(_observeArea)
+  }
+  _observeArea()
 
   function findBestPosition(ww, wh, areaW, areaH) {
     const existing = []
