@@ -15,6 +15,52 @@ const MIME = {
 }
 
 const server = http.createServer((req, res) => {
+  // CORS proxy for LLM API calls
+  if (req.url.startsWith('/api/proxy')) {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, x-api-key, x-base-url, anthropic-version, authorization',
+        'Access-Control-Max-Age': '86400'
+      })
+      return res.end()
+    }
+    let body = ''
+    req.on('data', c => body += c)
+    req.on('end', async () => {
+      const baseUrl = req.headers['x-base-url'] || 'https://api.anthropic.com'
+      const apiPath = req.url.replace('/api/proxy', '') || '/v1/messages'
+      const targetUrl = baseUrl + apiPath
+      const headers = { 'Content-Type': 'application/json' }
+      if (req.headers['x-api-key']) headers['x-api-key'] = req.headers['x-api-key']
+      if (req.headers['authorization']) headers['authorization'] = req.headers['authorization']
+      if (req.headers['anthropic-version']) headers['anthropic-version'] = req.headers['anthropic-version']
+      try {
+        const resp = await fetch(targetUrl, { method: 'POST', headers, body })
+        const corsHeaders = {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': resp.headers.get('content-type') || 'application/json'
+        }
+        res.writeHead(resp.status, corsHeaders)
+        // Stream the response
+        const reader = resp.body.getReader()
+        const pump = async () => {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) { res.end(); break }
+            res.write(value)
+          }
+        }
+        pump().catch(() => res.end())
+      } catch (err) {
+        res.writeHead(502, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
+      }
+    })
+    return
+  }
+
   let filePath = path.join(ROOT, req.url === '/' ? 'index.html' : req.url.split('?')[0])
   filePath = path.normalize(filePath)
   if (!filePath.startsWith(ROOT)) { res.writeHead(403); return res.end('Forbidden') }
