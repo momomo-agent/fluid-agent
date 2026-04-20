@@ -357,14 +357,9 @@ const Agent = (() => {
 
         if (action.action === 'execute' || action.action === 'redirect') {
           if (typeof Dispatcher !== 'undefined') {
-            // Route through IntentQueue → Dispatcher
-            Dispatcher.handleIntent(action, priority)
-            // If no Workers running, trigger immediate scheduling
-            const state = Dispatcher.getState()
-            if (state.running.length === 0) {
-              enqueueTask(action.task || userMsg, action.steps || [], action.priority ?? 1)
-            }
-            // Otherwise Dispatcher will handle at next checkpoint
+            // Route through Scheduler only (Dispatcher observes via afterTurn).
+            // Don't double-enqueue via IntentQueue + Scheduler.
+            enqueueTask(action.task || userMsg, action.steps || [], action.priority ?? 1)
           } else {
             enqueueTask(action.task || userMsg, action.steps, action.priority ?? 1)
           }

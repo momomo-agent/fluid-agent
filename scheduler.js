@@ -12,6 +12,14 @@ const Scheduler = (() => {
   // --- Task lifecycle ---
 
   function enqueue(taskDescription, steps = [], priority = 1, dependsOn = []) {
+    // Dedup: skip if same task is already pending or running
+    const norm = taskDescription.trim().toLowerCase()
+    const isDup = pending.some(t => t.task.trim().toLowerCase() === norm && t.status === 'pending')
+      || Array.from(slots.values()).some(s => s.task.trim().toLowerCase() === norm && s.status === 'running')
+    if (isDup) {
+      console.log(`[Scheduler] Dedup: "${taskDescription.slice(0, 60)}" already queued/running, skipping`)
+      return -1
+    }
     const id = nextTaskId++
     const entry = { id, task: taskDescription, steps, priority, dependsOn, status: 'pending' }
     pending.push(entry)
