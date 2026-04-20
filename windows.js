@@ -338,6 +338,17 @@ const WindowManager = (() => {
 
   function renderWindow(w) {
     const body = w.el.querySelector('.window-body')
+    // Try AppRegistry first (unified path)
+    if (typeof AppRegistry !== 'undefined' && AppRegistry.has(w.type)) {
+      const app = AppRegistry.get(w.type)
+      if (app.sandboxed) {
+        renderSandboxedApp(body, app, w)
+      } else if (app.render) {
+        app.render(w, body)
+      }
+      return
+    }
+    // Legacy fallback
     switch (w.type) {
       case 'finder': renderFinder(w, body); break
       case 'terminal': renderTerminal(w, body); break
@@ -351,6 +362,26 @@ const WindowManager = (() => {
       case 'app': renderApp(w, body); break
       case 'launchpad': renderLaunchpad(w, body); break
     }
+  }
+
+  // Render sandboxed app via iframe srcdoc
+  function renderSandboxedApp(body, app, w) {
+    const html = app.html || ''
+    const css = app.css || ''
+    const js = app.js || ''
+    const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; }
+button { cursor: pointer; }
+input, select, textarea { font-family: inherit; }
+${css}
+</style>${APP_BRIDGE_SCRIPT}</head><body>${html}<script>${js}<\/script></body></html>`
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'width:100%;height:100%;border:none'
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin')
+    iframe.srcdoc = doc
+    body.innerHTML = ''
+    body.appendChild(iframe)
   }
 
   // ── Finder ──
@@ -1071,19 +1102,45 @@ const WindowManager = (() => {
   }
 
   function renderLaunchpad(w, body) {
-    const builtIn = [
-      { name: 'Finder', icon: '📁', action: () => openFinder('/home/user') },
-      { name: 'Terminal', icon: '⬛', action: () => openTerminal() },
-      { name: 'Browser', icon: '🌐', action: () => openBrowser() },
-      { name: 'Music', icon: '🎵', action: () => openMusic() },
-      { name: 'Video', icon: '🎬', action: () => openVideo() },
-      { name: 'Map', icon: '🗺️', action: () => openMap() },
-      { name: 'Settings', icon: '⚙️', action: () => openSettings() },
-    ]
-    const custom = Array.from(installedApps.entries()).map(([name, app]) => ({
-      name, icon: app.icon || '💻', action: () => openApp(name), custom: true
-    }))
-    const all = [...builtIn, ...custom]
+    // Build app list from AppRegistry if available, else hardcoded
+    let all
+    if (typeof AppRegistry !== 'undefined') {
+      const openers = {
+        finder: () => openFinder('/home/user'),
+        terminal: () => openTerminal(),
+        browser: () => openBrowser(),
+        music: () => openMusic(),
+        video: () => openVideo(),
+        map: () => openMap(),
+        settings: () => openSettings(),
+      }
+      all = AppRegistry.launchpadApps()
+        .map(a => ({
+          name: a.name, icon: a.icon,
+          action: openers[a.id] || (() => openApp(a.id)),
+          custom: !a.builtin,
+        }))
+      // Add user-installed apps not yet in registry
+      for (const [name, app] of installedApps) {
+        if (!AppRegistry.has(name)) {
+          all.push({ name, icon: app.icon || '💻', action: () => openApp(name), custom: true })
+        }
+      }
+    } else {
+      const builtIn = [
+        { name: 'Finder', icon: '📁', action: () => openFinder('/home/user') },
+        { name: 'Terminal', icon: '⬛', action: () => openTerminal() },
+        { name: 'Browser', icon: '🌐', action: () => openBrowser() },
+        { name: 'Music', icon: '🎵', action: () => openMusic() },
+        { name: 'Video', icon: '🎬', action: () => openVideo() },
+        { name: 'Map', icon: '🗺️', action: () => openMap() },
+        { name: 'Settings', icon: '⚙️', action: () => openSettings() },
+      ]
+      const custom = Array.from(installedApps.entries()).map(([name, app]) => ({
+        name, icon: app.icon || '💻', action: () => openApp(name), custom: true
+      }))
+      all = [...builtIn, ...custom]
+    }
     body.innerHTML = `<div class="lp-grid">${all.map((a, i) => `
       <div class="lp-item" data-idx="${i}">
         <div class="lp-icon">${a.icon}</div>
@@ -1922,7 +1979,19 @@ document.getElementById('search').addEventListener('keydown', function(e) {
     if (!store) return
     const saved = await store.get('apps')
     if (saved) {
-      for (const [k, v] of Object.entries(saved)) installedApps.set(k, v)
+      for (const [k, v] of Object.entries(saved)) {
+        installedApps.set(k, v)
+        // Sync to AppRegistry
+        if (typeof AppRegistry !== 'undefined') {
+          AppRegistry.register({
+            id: k, name: k, icon: v.icon || '💻',
+            sandboxed: true, builtin: false, ephemeral: false,
+            size: { width: v.width || 420, height: v.height || 360 },
+            html: v.html, css: v.css || '', js: v.js || '',
+            description: v.description || '',
+          })
+        }
+      }
     }
   }
 
@@ -1930,9 +1999,29 @@ document.getElementById('search').addEventListener('keydown', function(e) {
     if (html) {
       installedApps.set(name, { html, css: css || '', js: js || '', icon: opts.icon || '💻', width: opts.width || 420, height: opts.height || 360, description: opts.description || '' })
       saveApps()
+      // Register in AppRegistry
+      if (typeof AppRegistry !== 'undefined') {
+        AppRegistry.register({
+          id: name, name, icon: opts.icon || '💻',
+          sandboxed: true, builtin: false, ephemeral: false,
+          size: { width: opts.width || 420, height: opts.height || 360 },
+          html, css: css || '', js: js || '',
+          description: opts.description || '',
+        })
+      }
     }
     const app = installedApps.get(name)
-    if (!app) return null
+    if (!app) {
+      // Try AppRegistry for registry-only apps
+      if (typeof AppRegistry !== 'undefined' && AppRegistry.has(name)) {
+        const regApp = AppRegistry.get(name)
+        const sz = AppRegistry.resolveSize(regApp)
+        const id = create({ type: name, title: regApp.name, width: sz.width, height: sz.height, data: {} })
+        updateDock()
+        return id
+      }
+      return null
+    }
     const id = create({ type: 'app', title: name, width: app.width || SIZE.small.width, height: app.height || SIZE.small.height, data: { name, html: app.html, css: app.css, js: app.js } })
     updateDock()
     return id
@@ -2264,5 +2353,20 @@ ${css}
     return { index: idx }
   }
 
-  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openLaunchpad, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, moveWindow, resizeWindow, minimizeByTitle, maximizeByTitle, unminimizeByTitle, tileWindows, musicAddTrack, registerBridgeHandler, getTaskHistory() { return taskHistory }, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
+  // ── Register builtin apps with AppRegistry ──
+  if (typeof AppRegistry !== 'undefined') {
+    AppRegistry.register({ id: 'finder', name: 'Finder', icon: '📁', sandboxed: false, size: 'medium', builtin: true, permissions: ['vfs'], render: renderFinder })
+    AppRegistry.register({ id: 'terminal', name: 'Terminal', icon: '⬛', sandboxed: false, size: 'medium', builtin: true, permissions: ['vfs', 'shell'], render: renderTerminal })
+    AppRegistry.register({ id: 'editor', name: 'Editor', icon: '📝', sandboxed: false, size: 'medium', builtin: true, permissions: ['vfs'], render: renderEditor })
+    AppRegistry.register({ id: 'plan', name: 'Plan', icon: '📋', sandboxed: false, size: 'small', builtin: true, render: renderPlan })
+    AppRegistry.register({ id: 'settings', name: 'Settings', icon: '⚙️', sandboxed: false, size: 'medium', singleton: true, builtin: true, render: renderSettings })
+    AppRegistry.register({ id: 'music', name: 'Music', icon: '🎵', sandboxed: false, size: 'small', singleton: true, builtin: true, render: renderMusic })
+    AppRegistry.register({ id: 'video', name: 'Video', icon: '🎬', sandboxed: false, size: 'large', builtin: true, render: renderVideo })
+    AppRegistry.register({ id: 'browser', name: 'Browser', icon: '🌐', sandboxed: false, size: 'large', builtin: true, render: renderBrowser })
+    AppRegistry.register({ id: 'map', name: 'Map', icon: '🗺️', sandboxed: false, size: 'large', singleton: true, builtin: true, render: renderMap })
+    AppRegistry.register({ id: 'launchpad', name: 'Launchpad', icon: '🚀', sandboxed: false, size: { width: 520, height: 420 }, singleton: true, builtin: true, showInLaunchpad: false, render: renderLaunchpad })
+    AppRegistry.register({ id: 'taskmanager', name: 'Task Manager', icon: '📊', sandboxed: false, size: 'medium', singleton: true, builtin: true, render: () => renderTaskManager() })
+  }
+
+  return { create, close: _close, focus, minimize, unminimize, toggleFullscreen, openLaunchpad, openFinder, openTerminal, openEditor, openPlan, updatePlan, openImage, openSettings, openMusic, openVideo, openBrowser, openMap, openApp, uninstallApp, getInstalledApps, openTaskManager, addTask, updateTask, updateDock, windows, getState, closeByTitle, focusByTitle, loadApps, restoreSession, saveSession, mapAddMarker, mapClearMarkers, mapShowRoute, mapClearRoute, moveWindow, resizeWindow, minimizeByTitle, maximizeByTitle, unminimizeByTitle, tileWindows, musicAddTrack, registerBridgeHandler, renderSandboxedApp, getTaskHistory() { return taskHistory }, getFocused() { for (const [id, w] of windows) { if (w.el.classList.contains('focused')) return id } return null } }
 })()

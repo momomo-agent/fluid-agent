@@ -322,19 +322,43 @@
       switch (action) {
         case 'create': case 'update': {
           let appHtml = html, appCss = css, appJs = js
+          const appDir = `/home/user/apps/${name}`
           if (!appHtml) {
-            const appDir = `/home/user/apps/${name}`
             if (VFS.isFile(`${appDir}/index.html`)) appHtml = VFS.readFile(`${appDir}/index.html`)
             if (VFS.isFile(`${appDir}/style.css`)) appCss = VFS.readFile(`${appDir}/style.css`)
             if (VFS.isFile(`${appDir}/script.js`)) appJs = VFS.readFile(`${appDir}/script.js`)
             if (!appHtml) return { error: `No html provided and no index.html found at ${appDir}/. Write files first with fs tool, then call app create.` }
           }
+          // Write manifest.json to VFS
+          VFS.mkdir(appDir)
+          const manifest = { id: name, name, icon: icon || '💻', sandboxed: true, size: { width: width || 420, height: height || 360 }, description: description || '' }
+          VFS.writeFile(`${appDir}/manifest.json`, JSON.stringify(manifest, null, 2))
+          if (appHtml) VFS.writeFile(`${appDir}/index.html`, appHtml)
+          if (appCss) VFS.writeFile(`${appDir}/style.css`, appCss)
+          if (appJs) VFS.writeFile(`${appDir}/script.js`, appJs)
           WindowManager.openApp(name, appHtml, appCss || '', appJs || '', { icon, width, height, description })
           showActivity(`💻 ${action === 'create' ? 'Created' : 'Updated'} app: ${name}`)
           return { success: true, message: `App "${name}" ${action === 'create' ? 'created and opened' : 'updated'}` }
         }
-        case 'uninstall': { const ok = WindowManager.uninstallApp?.(name); if (ok) { showActivity(`🗑️ Uninstalled: ${name}`); return { success: true } } return { error: `App "${name}" not found` } }
-        case 'list': return { apps: WindowManager.getInstalledApps() }
+        case 'uninstall': {
+          const ok = WindowManager.uninstallApp?.(name)
+          if (typeof AppRegistry !== 'undefined') AppRegistry.unregister(name)
+          // Clean up VFS
+          const appDir = `/home/user/apps/${name}`
+          if (VFS.isDir(appDir)) {
+            const files = VFS.ls(appDir)
+            if (files) files.forEach(f => VFS.rm(`${appDir}/${f.name}`))
+            VFS.rm(appDir)
+          }
+          if (ok) { showActivity(`🗑️ Uninstalled: ${name}`); return { success: true } }
+          return { error: `App "${name}" not found` }
+        }
+        case 'list': {
+          if (typeof AppRegistry !== 'undefined') {
+            return { apps: AppRegistry.list(a => !a.builtin && !a.ephemeral).map(a => ({ name: a.name, icon: a.icon, description: a.description || '' })) }
+          }
+          return { apps: WindowManager.getInstalledApps() }
+        }
         default: return { error: `Unknown app action: ${action}` }
       }
     }

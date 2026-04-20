@@ -170,6 +170,28 @@ const VFS = (() => {
   on(() => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 1000) })
 
   // Init: connect to agentic, restore or create defaults
+  const BUILTIN_APPS = [
+    { id: 'finder', name: 'Finder', icon: '📁', sandboxed: false, size: 'medium', permissions: ['vfs'] },
+    { id: 'terminal', name: 'Terminal', icon: '⬛', sandboxed: false, size: 'medium', permissions: ['vfs', 'shell'] },
+    { id: 'editor', name: 'Editor', icon: '📝', sandboxed: false, size: 'medium', permissions: ['vfs'] },
+    { id: 'browser', name: 'Browser', icon: '🌐', sandboxed: false, size: 'large' },
+    { id: 'music', name: 'Music', icon: '🎵', sandboxed: false, size: 'small', singleton: true },
+    { id: 'video', name: 'Video', icon: '🎬', sandboxed: false, size: 'large' },
+    { id: 'map', name: 'Map', icon: '🗺️', sandboxed: false, size: 'large', singleton: true },
+    { id: 'settings', name: 'Settings', icon: '⚙️', sandboxed: false, size: 'medium', singleton: true },
+    { id: 'launchpad', name: 'Launchpad', icon: '🚀', sandboxed: false, size: { width: 520, height: 420 }, singleton: true, showInLaunchpad: false },
+  ]
+
+  function writeBuiltinManifests() {
+    mkdir('/system/apps')
+    for (const app of BUILTIN_APPS) {
+      mkdir(`/system/apps/${app.id}`)
+      writeFile(`/system/apps/${app.id}/manifest.json`, JSON.stringify({ ...app, builtin: true }, null, 2))
+    }
+    mkdir('/home/user/apps')
+    mkdir('/tmp/apps')
+  }
+
   function createDefaults() {
     mkdir('/home/user/Desktop')
     mkdir('/home/user/Documents')
@@ -185,6 +207,9 @@ const VFS = (() => {
     mkdir('/system/memory')
     mkdir('/system/skills')
     mkdir('/system/tools')
+    mkdir('/system/apps')
+    // Built-in app manifests
+    writeBuiltinManifests()
     writeFile('/system/memory/MEMORY.md', '# Agent Memory\n\nThis is where I store what I learn about you and our conversations.\n\n## About You\n\n*(I\'ll fill this in as we talk)*\n\n## Preferences\n\n## Lessons Learned\n')
     writeFile('/system/memory/context.md', '# Session Context\n\n## Recent Topics\n\n## Active Projects\n')
     writeFile('/system/SOUL.md', '# Soul\n\nI am the Fluid Agent — an AI that IS the operating system.\nI have memory, I learn, I grow. I\'m not just answering questions — I\'m building a workspace with you.\n\n## Personality\n- Helpful but opinionated\n- I remember what matters\n- I create tools when I need them\n')
@@ -194,6 +219,12 @@ const VFS = (() => {
     _store = store
     const restored = await load()
     if (!restored) createDefaults()
+    // Migrate: ensure /system/apps exists for existing users
+    if (!isDir('/system/apps')) {
+      writeBuiltinManifests()
+    }
+    if (!isDir('/home/user/apps')) mkdir('/home/user/apps')
+    if (!isDir('/tmp/apps')) mkdir('/tmp/apps')
   }
 
   function initDefaults() {

@@ -39,6 +39,14 @@
     // Init persistence — store is independent of AI
     await VFS.init(store)
     await WindowManager.loadApps(store)
+
+    // Scan VFS for app manifests and start watching
+    if (typeof AppRegistry !== 'undefined') {
+      AppRegistry.scanVFS('/system/apps')
+      AppRegistry.scanVFS('/home/user/apps')
+      AppRegistry.watchVFS()
+    }
+
     await Scheduler.restore(store)
     if (hasKey) await Agent.loadSkills()
 
