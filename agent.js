@@ -150,11 +150,9 @@ const Agent = (() => {
 
   function configure(provider, apiKey, model, baseUrl, storeInstance) {
     const opts = { provider, apiKey }
-    // Use CORS proxy for external APIs (browser can't call them directly)
+    // Use CORS proxy only when explicitly enabled in settings
     const settings = window._settingsCache || {}
-    if (baseUrl && baseUrl.includes('localhost')) {
-      // Local API, no proxy needed
-    } else {
+    if (settings.useProxy && !(baseUrl && baseUrl.includes('localhost'))) {
       opts.proxyUrl = 'https://proxy.link2web.site'
     }
     if (storeInstance) opts.store = { instance: storeInstance }
@@ -749,7 +747,7 @@ Be natural, concise, and have personality.`
     // --- Merge External Skills (from Visual Talk) ---
     const _getConfig = () => {
       const s = window._settingsCache || {}
-      return { tavilyKey: s.tavilyKey, tmdbKey: s.tmdbKey, proxyUrl: 'https://proxy.link2web.site' }
+      return { tavilyKey: s.tavilyKey, tmdbKey: s.tmdbKey, proxyUrl: s.useProxy ? 'https://proxy.link2web.site' : undefined }
     }
     if (typeof ExternalSkills !== 'undefined') {
       const ext = ExternalSkills.register(_getConfig)
@@ -856,15 +854,28 @@ You ARE the OS. Don't just open apps - use them. Create new apps when the user n
 When a task produces results worth showing, prefer DynamicApp (⚡ dynamicapp tool).
 DynamicApp creates a live workbench window that auto-updates as you write to its state files.
 
-- Example: dynamicapp({action:"open", id:"weather-report", title:"北京天气", icon:"🌤️", object:{temp:"25°C", humidity:"60%"}, view:{template:"table"}})
-- Update: fs({action:"write", path:"/system/dynamic-apps/weather-report/object.json", content: JSON.stringify(newData)})
+### Quick Templates (fast path)
+For simple data, use built-in templates:
+- dynamicapp({action:"open", id:"weather", title:"北京天气", icon:"🌤️", object:{temp:"25°C", humidity:"60%"}})
+- Table: view:{template:"table"}, object:{columns:[...], rows:[...]}
+- List: view:{template:"list"}, object:{items:[...]}
+- Markdown: view:{template:"markdown"}, object:{content:"..."}
 
-Decision rule:
-- If a built-in app already handles it well (e.g. Music for playback, Map for locations, Browser for web), use the built-in app.
-- If DynamicApp can present the results BETTER than any existing app (richer context, custom layout, combined data), use DynamicApp.
-- DynamicApp is better than dumping results into chat — it gives the user a proper workspace.
-- Only fall back to plain chat replies for simple Q&A that doesn't need a visual surface.
-- A DynamicApp can be "promoted" to a permanent app if the user wants to keep it.
+### Custom HTML Views (rich path)
+For richer presentations, provide custom HTML:
+- dynamicapp({action:"open", id:"dashboard", title:"Dashboard", html:"<div>...</div>", object:{...}})
+- Data is available as window.__object in your HTML
+- Call triggerAction(actionId, params) to emit actions back to the agent
+- HTML is rendered in a sandboxed iframe with dark theme defaults
+- Update data: dynamicapp({action:"update", id:"dashboard", object:{...}}) — the iframe re-renders with new data
+- Update view: dynamicapp({action:"update", id:"dashboard", html:"<div>new layout</div>"})
+
+### When to use what
+- Simple key-value, table, list → built-in templates (fast, no HTML needed)
+- Charts, dashboards, interactive widgets, custom layouts → custom HTML
+- If a built-in app already handles it well (Music, Map, Browser), use the built-in app
+- DynamicApp is better than dumping results into chat — it gives the user a proper workspace
+- A DynamicApp can be "promoted" to a permanent app if the user wants to keep it
 
 ## Creating Traditional Apps
 For anything beyond a trivial app, use the file-driven workflow:

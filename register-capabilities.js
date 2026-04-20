@@ -373,19 +373,25 @@
   })
 
   Capabilities.register('dynamicapp', {
-    description: 'Create and manage dynamic workbench windows. The agent writes state files and the window auto-updates. Use open to create/reopen, list to see all, close to dismiss, destroy to delete.',
+    description: 'Create and manage dynamic workbench windows. The agent writes state files and the window auto-updates. Use open to create/reopen, update to change data/view, list to see all, close to dismiss, destroy to delete. You can provide custom HTML via the html parameter for rich custom views.',
     icon: '⚡',
     category: 'Apps',
     alwaysAvailable: true,
-    schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'close', 'destroy', 'list'] }, id: { type: 'string', description: 'App id (used as directory name)' }, title: { type: 'string' }, icon: { type: 'string' }, object: { type: 'object', description: 'Initial data object' }, actions: { type: 'array', description: 'Action buttons [{id, label, icon?, style?}]' }, view: { type: 'object', description: 'View config {template: "table"|"list"|"markdown"}' } }, required: ['action'] },
-    handler: ({ action, id, title, icon, object, actions, view }, ctx) => {
+    schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'update', 'close', 'destroy', 'list'] }, id: { type: 'string', description: 'App id (used as directory name)' }, title: { type: 'string' }, icon: { type: 'string' }, object: { type: 'object', description: 'Data object (injected as window.__object in custom HTML views)' }, actions: { type: 'array', description: 'Action buttons [{id, label, icon?, style?}]', items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, style: { type: 'string' } }, required: ['id', 'label'] } }, view: { type: 'object', description: 'View config {template: "table"|"list"|"markdown"} for built-in templates' }, html: { type: 'string', description: 'Custom HTML for rich views. Data available as window.__object. Call triggerAction(id, params) for actions.' } }, required: ['action'] },
+    handler: ({ action, id, title, icon, object, actions, view, html }, ctx) => {
       switch (action) {
         case 'open': {
           if (!id) return { error: 'id is required' }
           // If already exists, reopen; otherwise create
           const p = DynamicApp.paths(id)
           if (VFS.isFile(p.meta)) return DynamicApp.open(id)
-          return DynamicApp.create(id, { title, icon, object, actions, view })
+          const result = DynamicApp.create(id, { title, icon, object, actions, view })
+          if (html) DynamicApp.update(id, { html })
+          return result
+        }
+        case 'update': {
+          if (!id) return { error: 'id is required' }
+          return DynamicApp.update(id, { object, actions, view, html })
         }
         case 'close': return id ? DynamicApp.close(id) : { error: 'id is required' }
         case 'destroy': return id ? DynamicApp.destroy(id) : { error: 'id is required' }

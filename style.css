@@ -878,3 +878,4 @@ select.settings-input { appearance: none; cursor: pointer; }
 .dapp-list-item { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
 .dapp-list-item:last-child { border-bottom: none; }
 .dapp-markdown { font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.dapp-custom-frame { width: 100%; border: none; flex: 1; min-height: 200px; background: transparent; border-radius: 4px; }

@@ -5,6 +5,7 @@
 const DynamicApp = (() => {
   const BASE = '/system/dynamic-apps'
   const _watchers = new Map() // appId → { winId, dispose }
+  const _viewCache = new Map() // appId → compiled HTML string
 
   function paths(id) {
     const dir = `${BASE}/${id}`
@@ -71,9 +72,24 @@ const DynamicApp = (() => {
     return { id, winId }
   }
 
+  // Update an existing DynamicApp's state files
+  function update(id, { object, actions, view, html } = {}) {
+    const p = paths(id)
+    if (!VFS.isFile(p.meta)) return { error: `DynamicApp "${id}" not found` }
+    if (object !== undefined) VFS.writeFile(p.object, JSON.stringify(object, null, 2))
+    if (actions !== undefined) VFS.writeFile(p.actions, JSON.stringify(actions, null, 2))
+    if (view !== undefined) VFS.writeFile(p.view, JSON.stringify(view, null, 2))
+    if (html !== undefined) {
+      VFS.writeFile(p.dir + '/view.html', html)
+      _viewCache.delete(id) // invalidate cache
+    }
+    return { success: true, id }
+  }
+
   // Close and clean up
   function close(id) {
     stopWatching(id)
+    _viewCache.delete(id)
     AppRegistry.unregister(`dapp-${id}`)
     // Don't delete VFS files — they persist for re-opening
     return { success: true }
@@ -86,6 +102,8 @@ const DynamicApp = (() => {
     for (const key of ['meta', 'object', 'actions', 'view']) {
       if (VFS.isFile(p[key])) VFS.rm(p[key])
     }
+    const htmlPath = p.dir + '/view.html'
+    if (VFS.isFile(htmlPath)) VFS.rm(htmlPath)
     if (VFS.isDir(p.dir)) VFS.rm(p.dir)
     return { success: true }
   }
@@ -108,11 +126,19 @@ const DynamicApp = (() => {
     const object = readJSON(p.object) || {}
     const actions = readJSON(p.actions) || []
     const view = readJSON(p.view)
+    const htmlPath = p.dir + '/view.html'
+    const customHtml = VFS.isFile(htmlPath) ? VFS.readFile(htmlPath) : null
 
     body.innerHTML = ''
     body.classList.add('dapp-body')
 
-    // Object section — render key-value pairs or custom view
+    // Custom HTML view — sandboxed iframe with object data injected
+    if (customHtml) {
+      renderCustomView(body, customHtml, object, actions, id)
+      return
+    }
+
+    // Object section — render key-value pairs or template view
     const objectEl = document.createElement('div')
     objectEl.className = 'dapp-object'
     renderObject(objectEl, object, view)
@@ -125,6 +151,76 @@ const DynamicApp = (() => {
       renderActions(actionsEl, actions, id)
       body.appendChild(actionsEl)
     }
+  }
+
+  // Render custom HTML view in a sandboxed iframe
+  function renderCustomView(body, html, object, actions, appId) {
+    // Inject object data and action bridge into the HTML
+    const injection = `
+<script>
+  window.__object = ${JSON.stringify(object)};
+  window.__actions = ${JSON.stringify(actions)};
+  window.__appId = ${JSON.stringify(appId)};
+  // Action bridge: call triggerAction(actionId, params) to emit to parent
+  function triggerAction(actionId, params) {
+    window.parent.postMessage({ type: 'dapp-action', appId: window.__appId, actionId, params: params || {} }, '*');
+  }
+  // Listen for data updates from parent (smart re-render)
+  window.addEventListener('message', (e) => {
+    if (e.data?.type === 'dapp-update' && e.data.object) {
+      window.__object = e.data.object;
+      if (typeof onDataUpdate === 'function') onDataUpdate(window.__object);
+    }
+  });
+  // Notify parent of height changes for auto-resize
+  const _ro = new ResizeObserver(() => {
+    window.parent.postMessage({ type: 'dapp-resize', height: document.body.scrollHeight }, '*');
+  });
+  _ro.observe(document.body);
+</script>`
+
+    // Build full HTML document
+    const fullHtml = html.includes('<html') ? html.replace('</head>', injection + '</head>') :
+      `<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #e0e0e0; background: transparent; padding: 16px; line-height: 1.5; }
+  a { color: #7eb8ff; }
+</style>
+${injection}
+</head><body>${html}</body></html>`
+
+    const iframe = document.createElement('iframe')
+    iframe.className = 'dapp-custom-frame'
+    iframe.sandbox = 'allow-scripts'
+    iframe.srcdoc = fullHtml
+    iframe.style.cssText = 'width:100%;border:none;flex:1;min-height:200px;background:transparent;'
+
+    // Listen for messages from iframe
+    const msgHandler = (e) => {
+      if (e.source !== iframe.contentWindow) return
+      if (e.data?.type === 'dapp-action') {
+        if (typeof EventBus !== 'undefined') {
+          EventBus.emit('dynamicapp.action', { appId: e.data.appId, actionId: e.data.actionId, params: e.data.params || {} })
+        }
+      } else if (e.data?.type === 'dapp-resize') {
+        iframe.style.height = Math.min(e.data.height + 20, 800) + 'px'
+      }
+    }
+    window.addEventListener('message', msgHandler)
+
+    // Clean up listener when body is cleared
+    const observer = new MutationObserver(() => {
+      if (!body.contains(iframe)) {
+        window.removeEventListener('message', msgHandler)
+        observer.disconnect()
+      }
+    })
+    observer.observe(body, { childList: true })
+
+    body.style.padding = '0'
+    body.appendChild(iframe)
   }
 
   function renderObject(el, object, view) {
@@ -203,18 +299,27 @@ const DynamicApp = (() => {
   function startWatching(id, winId) {
     stopWatching(id) // clean up any existing watcher
     const p = paths(id)
-    const watchPaths = [p.object, p.actions, p.view]
+    const watchPaths = [p.object, p.actions, p.view, p.dir + '/view.html']
 
     // VFS.on doesn't return dispose, so we track the handler
     const handler = (event, path) => {
-      if (watchPaths.includes(path)) {
-        // Re-render the window
-        const w = WindowManager.windows.get(winId)
-        if (w) {
-          const body = w.el.querySelector('.window-body')
-          if (body) renderDynamicApp(id, w, body)
-        }
+      if (!watchPaths.includes(path)) return
+      const w = WindowManager.windows.get(winId)
+      if (!w) return
+      const body = w.el.querySelector('.window-body')
+      if (!body) return
+
+      // Smart update: if custom HTML iframe exists and only object.json changed,
+      // push new data via postMessage instead of rebuilding the iframe
+      const iframe = body.querySelector('.dapp-custom-frame')
+      if (iframe && path === p.object) {
+        const newObject = readJSON(p.object) || {}
+        iframe.contentWindow?.postMessage({ type: 'dapp-update', object: newObject }, '*')
+        return
       }
+
+      // Full re-render for view.html changes, actions changes, or non-iframe views
+      renderDynamicApp(id, w, body)
     }
     VFS.on(handler)
     _watchers.set(id, { winId, handler })
@@ -236,5 +341,5 @@ const DynamicApp = (() => {
     return div.innerHTML
   }
 
-  return { create, open, close, destroy, list, paths, readJSON, renderDynamicApp, BASE }
+  return { create, open, close, destroy, update, list, paths, readJSON, renderDynamicApp, BASE }
 })()
