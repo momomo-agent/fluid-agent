@@ -68,7 +68,7 @@ const Agent = (() => {
     container.appendChild(sep)
     restored.slice(-10).forEach(m => {
       if (m.role === 'user' || m.role === 'assistant') {
-        addBubble(m.role === 'assistant' ? 'agent' : 'user', m.content?.slice(0, 500) || '')
+        addBubble(m.role === 'assistant' ? 'agent' : 'user', m.role === 'assistant' ? cleanReply(m.content || '') : (m.content?.slice(0, 500) || ''))
       }
     })
   } // pending tasks
@@ -547,12 +547,9 @@ const Agent = (() => {
     // Remove complete fenced JSON blocks (```json...```)
     let cleaned = text.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/g, '')
     // Remove incomplete fenced block still streaming (``` opened but not closed)
-    // Match from first ``` that looks like JSON start to end of string
-    cleaned = cleaned.replace(/```(?:json)?\s*[\{\[].*$/gs, '')
+    cleaned = cleaned.replace(/```(?:json)?(?:\s*[\{\[].*)?$/gs, '')
     // Remove bare JSON action/intent objects (no fences) — from { to end
     cleaned = cleaned.replace(/\{\s*"(?:action|reply|intents)"\s*:[\s\S]*$/g, '')
-    // Remove any remaining ``` markers
-    cleaned = cleaned.replace(/```/g, '')
     return cleaned.trim()
   }
 
