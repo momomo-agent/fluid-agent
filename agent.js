@@ -545,12 +545,12 @@ const Agent = (() => {
 
   function cleanReply(text) {
     // Remove complete fenced JSON blocks (```json...```)
-    // Use greedy match for the JSON body to handle nested braces
-    let cleaned = text.replace(/```(?:json)?\s*\{[\s\S]*\}\s*```/g, '')
+    let cleaned = text.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/g, '')
     // Remove incomplete fenced block still streaming (``` opened but not closed)
-    cleaned = cleaned.replace(/```(?:json)?\s*\{[\s\S]*$/g, '')
-    // Remove bare JSON action/intent objects (no fences)
-    cleaned = cleaned.replace(/\{\s*"(?:action|reply|intents)"\s*:[\s\S]*\}\s*$/g, '')
+    // Match from first ``` that looks like JSON start to end of string
+    cleaned = cleaned.replace(/```(?:json)?\s*[\{\[].*$/gs, '')
+    // Remove bare JSON action/intent objects (no fences) — from { to end
+    cleaned = cleaned.replace(/\{\s*"(?:action|reply|intents)"\s*:[\s\S]*$/g, '')
     // Remove any remaining ``` markers
     cleaned = cleaned.replace(/```/g, '')
     return cleaned.trim()
