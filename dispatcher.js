@@ -366,18 +366,20 @@ const Dispatcher = (() => {
 
   function formatForTalker() {
     const s = getStateSummary()
-    if (s.workers.length === 0 && s.intents.length === 0) return ''
+    if (s.workers.length === 0 && s.intents.length === 0) return '\n## Dispatch State\nNo active tasks. Ready for new work.\n'
 
-    let out = 'DISPATCH STATE:\n'
+    let out = '\n## Dispatch State\n'
     if (s.workers.length) {
-      out += '- Workers: ' + s.workers.map(w =>
-        `#${w.id} "${w.task}"(${w.status}, turn ${w.turnCount}, ${w.elapsed}s)`
-      ).join(' | ') + '\n'
+      out += 'Active Workers:\n'
+      for (const w of s.workers) {
+        out += `- Worker #${w.id}: "${w.task}" [${w.status}] (turn ${w.turnCount}, ${w.elapsed}s, last tool: ${w.lastTool || 'none'})\n`
+      }
+      out += '\nIMPORTANT: If the user\'s new message relates to an active Worker\'s task, use STEER to redirect it — do NOT create a duplicate task.\n'
     }
     if (s.intents.length) {
-      out += `- Queue: ${s.intents.length} intent(s)\n`
+      out += `Queued intents: ${s.intents.length}\n`
     }
-    out += `- Slots: ${Scheduler.MAX_SLOTS - s.freeSlots}/${Scheduler.MAX_SLOTS} used\n`
+    out += `Slots: ${Scheduler.MAX_SLOTS - s.freeSlots}/${Scheduler.MAX_SLOTS} used\n`
     return out
   }
 

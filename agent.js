@@ -562,34 +562,53 @@ Current OS state:
 - Installed apps: ${os.installedApps}
 - Installed skills: ${os.skills}
 `
-    if (runningTasks.length > 0) {
-      sys += `\nCurrently executing: ${runningTasks[0].task} (${runningTasks[0].status})`
-      if (queuedCount > 0) sys += `\nQueued tasks: ${queuedCount}`
-    }
     // Inject Dispatcher state so Talker knows what Workers are doing
     const dispatchState = typeof Dispatcher !== 'undefined' ? Dispatcher.formatForTalker() : ''
     if (dispatchState) sys += dispatchState
     sys += `\nCompleted recently: ${blackboard.completedSteps.map(s => s.text).join(', ') || 'none'}`
 
-    sys += `\n\nWhen the user wants you to DO something (not just talk), use action blocks:
+    sys += `\n\nWhen the user wants you to DO something (not just talk), use action blocks.
 
-1. EXECUTE a task (priority: 0=urgent, 1=normal, 2=background):
+## Scheduling Decision Guide
+
+Before emitting any action block, ALWAYS check the dispatch state above. Your job is to understand the user's INTENT in context:
+
+**Is a Worker already running?**
+- User refines/changes the current task → STEER (don't create a new task!)
+- User asks something completely unrelated → new EXECUTE
+- User says "stop" / "cancel" / "算了" → ABORT
+
+**Multiple things to do?**
+- Steps that depend on each other ("find X, then do Y with it") → ONE task with ordered steps
+- Independent tasks ("play music AND open browser") → PARALLEL (multiple execute blocks)
+
+**Priority:**
+- 0 = urgent (interrupt current work)
+- 1 = normal
+- 2 = background (don't interrupt)
+
+## Action Blocks
+
+1. EXECUTE a new task:
 \`\`\`json
-{"action": "execute", "reply": "your conversational reply", "task": "what to do", "steps": ["step 1", "step 2"], "priority": 1}
+{"action": "execute", "reply": "your reply", "task": "what to do", "steps": ["step 1", "step 2"], "priority": 1}
 \`\`\`
-{"action": "steer", "reply": "your reply", "instruction": "new direction"}
+
+2. STEER an existing Worker (change direction, add context, refine):
+\`\`\`json
+{"action": "steer", "reply": "your reply", "instruction": "new direction or additional context"}
 \`\`\`
+Use steer when the user's message is a follow-up, correction, or refinement of what's already running. Do NOT create a new task for follow-ups.
 
 3. ABORT everything:
 \`\`\`json
 {"action": "abort", "reply": "your reply"}
 \`\`\`
 
-4. REMEMBER something (update your memory):
+4. REMEMBER something:
 \`\`\`json
 {"action": "remember", "reply": "your reply", "memory": "what to remember", "section": "About You|Preferences|Lessons Learned"}
 \`\`\`
-Use this when you learn something important about the user, their preferences, or a lesson. Your memory persists across sessions.
 
 You also have SKILLS — reusable tools you've created. When executing tasks, you can use existing skills or create new ones.
 Installed skills: ${os.skills}
