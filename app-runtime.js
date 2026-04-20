@@ -176,9 +176,19 @@ ${bridgeScript}
       }
       VFS.writeFile(dataPath, JSON.stringify(newData, null, 2))
       // VFS watcher will push the update to the iframe
-    } else if (actionDef.handler === 'worker') {
-      // Dispatch to agent/worker via EventBus
-      if (typeof EventBus !== 'undefined') {
+    } else {
+      // Default: dispatch as intent (same pipeline as user chat)
+      const data = dataPath ? _readJSON(dataPath) || {} : {}
+      const label = actionDef.label || actionId
+      const appName = manifest.name || manifest.id
+      const dataSnippet = JSON.stringify(data).slice(0, 500)
+      const paramStr = params && Object.keys(params).length ? ` with ${JSON.stringify(params)}` : ''
+      const goal = `User clicked "${label}"${paramStr} in ${appName} app. Current data: ${dataSnippet}. App path: ${appPath}`
+
+      if (typeof IntentState !== 'undefined') {
+        IntentState.create(goal)
+      } else if (typeof EventBus !== 'undefined') {
+        // Fallback if IntentState not loaded
         EventBus.emit('app-runtime.action', {
           appId: manifest.id, actionId, params: params || {},
           appPath, dataPath, actionsPath,
