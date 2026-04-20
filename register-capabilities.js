@@ -376,6 +376,7 @@
     description: 'Create and manage dynamic workbench windows. The agent writes state files and the window auto-updates. Use open to create/reopen, list to see all, close to dismiss, destroy to delete.',
     icon: '⚡',
     category: 'Apps',
+    alwaysAvailable: true,
     schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'close', 'destroy', 'list'] }, id: { type: 'string', description: 'App id (used as directory name)' }, title: { type: 'string' }, icon: { type: 'string' }, object: { type: 'object', description: 'Initial data object' }, actions: { type: 'array', description: 'Action buttons [{id, label, icon?, style?}]' }, view: { type: 'object', description: 'View config {template: "table"|"list"|"markdown"}' } }, required: ['action'] },
     handler: ({ action, id, title, icon, object, actions, view }, ctx) => {
       switch (action) {
