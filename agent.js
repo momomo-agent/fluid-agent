@@ -412,16 +412,25 @@ const Agent = (() => {
 
       function _tryStreamDispatch(text) {
         if (_streamDispatched) return
-        const match = text.match(/```json\s*(\{[\s\S]*?\})\s*```/)
-        if (!match) return
         let parsed
-        try {
-          parsed = JSON.parse(match[1])
-        } catch {
-          const start = text.indexOf('{', text.indexOf('```json'))
-          const end = text.lastIndexOf('```')
-          if (start >= 0 && end > start) {
-            try { parsed = JSON.parse(text.slice(start, end).trim()) } catch { return }
+        // Try fenced JSON first
+        const match = text.match(/```json\s*(\{[\s\S]*?\})\s*```/)
+        if (match) {
+          try {
+            parsed = JSON.parse(match[1])
+          } catch {
+            const start = text.indexOf('{', text.indexOf('```json'))
+            const end = text.lastIndexOf('```')
+            if (start >= 0 && end > start) {
+              try { parsed = JSON.parse(text.slice(start, end).trim()) } catch { /* fall through */ }
+            }
+          }
+        }
+        // Fallback: bare JSON with reply or intents or action key
+        if (!parsed) {
+          const bareMatch = text.match(/\{\s*"(?:reply|intents|action)"\s*:[\s\S]*\}/)
+          if (bareMatch) {
+            try { parsed = JSON.parse(bareMatch[0]) } catch { /* not complete yet */ return }
           } else return
         }
         if (!parsed) return
@@ -542,8 +551,8 @@ const Agent = (() => {
     let cleaned = text.replace(/```(?:json)?\s*\{[\s\S]*\}\s*```/g, '')
     // Remove incomplete fenced block still streaming (``` opened but not closed)
     cleaned = cleaned.replace(/```(?:json)?\s*\{[\s\S]*$/g, '')
-    // Remove bare JSON action objects (no fences)
-    cleaned = cleaned.replace(/\{\s*"action"\s*:[\s\S]*\}\s*$/g, '')
+    // Remove bare JSON action/intent objects (no fences)
+    cleaned = cleaned.replace(/\{\s*"(?:action|reply|intents)"\s*:[\s\S]*\}\s*$/g, '')
     // Remove any remaining ``` markers
     cleaned = cleaned.replace(/```/g, '')
     return cleaned.trim()
@@ -651,9 +660,9 @@ Be natural, concise, and have personality.`
         }
       }
     }
-    // Also try bare JSON (no fences)
+    // Also try bare JSON (no fences) — match action blocks or intent blocks
     if (blocks.length === 0) {
-      const bareMatch = text.match(/\{\s*"action"\s*:[\s\S]*\}/)
+      const bareMatch = text.match(/\{\s*"(?:action|reply|intents)"\s*:[\s\S]*\}/)
       if (bareMatch) {
         try { blocks.push(JSON.parse(bareMatch[0])) } catch {}
       }
