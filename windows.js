@@ -968,13 +968,36 @@ ${css}
     const ds = typeof Dispatcher !== 'undefined' ? Dispatcher.getState() : { running: [], pending: [] }
     const ss = typeof Scheduler !== 'undefined' ? Scheduler.getState() : { running: [], pending: [], completed: [], freeSlots: 3 }
 
+    // Intent state
+    const intents = typeof IntentState !== 'undefined' ? IntentState.all() : []
+    const activeIntents = intents.filter(i => i.status === 'active')
+
     body.innerHTML = `<div class="tm-layout">
       <div class="tm-tabs">
         <button class="tm-tab ${currentView === 'detail' ? 'active' : ''}" data-view="detail">Tasks</button>
         <button class="tm-tab ${currentView === 'log' ? 'active' : ''}" data-view="log">Log${selected?.log.length ? ` · ${selected.log.length}` : ''}</button>
         <button class="tm-tab ${currentView === 'queue' ? 'active' : ''}" data-view="queue">Queue${ds.running.length + ds.pending.length + ss.pending.length > 0 ? ` · ${ds.running.length + ds.pending.length + ss.pending.length}` : ''}</button>
+        <button class="tm-tab ${currentView === 'intents' ? 'active' : ''}" data-view="intents">Intents${activeIntents.length ? ` · ${activeIntents.length}` : ''}</button>
       </div>
-      ${currentView === 'queue' ? `
+      ${currentView === 'intents' ? `
+      <div class="tm-intents">
+        ${intents.length ? intents.sort((a, b) => b.updatedAt - a.updatedAt).map(i => {
+          const statusIcon = i.status === 'active' ? '▶' : i.status === 'done' ? '✓' : i.status === 'cancelled' ? '✕' : '○'
+          const age = Math.round((Date.now() - i.createdAt) / 1000)
+          const ageStr = age < 60 ? age + 's' : age < 3600 ? Math.round(age / 60) + 'm' : Math.round(age / 3600) + 'h'
+          const msgs = i.messages || []
+          return `<div class="tm-intent-item ${i.status}">
+            <div class="tm-intent-header">
+              <span class="tm-intent-status">${statusIcon}</span>
+              <span class="tm-intent-id">${i.id}</span>
+              <span class="tm-intent-age">${ageStr}</span>
+            </div>
+            <div class="tm-intent-goal">${i.goal}</div>
+            ${msgs.length ? `<div class="tm-intent-messages">${msgs.slice(-5).map(m => `<div class="tm-intent-msg">"${m.slice(0, 60)}${m.length > 60 ? '…' : ''}"</div>`).join('')}</div>` : ''}
+            ${i.goalHistory?.length ? `<div class="tm-intent-history">${i.goalHistory.map(h => `<div class="tm-intent-prev-goal">← ${h.goal.slice(0, 50)}</div>`).join('')}</div>` : ''}
+          </div>`
+        }).join('') : '<div class="tm-empty">No intents yet</div>'}
+      </div>` : currentView === 'queue' ? `
       <div class="tm-queue">
         ${ds.running.length ? `<div class="tm-queue-section">Running</div>${ds.running.map(r => `<div class="tm-queue-item running"><span>▶</span><span>${(r.task || '').slice(0,50)}</span></div>`).join('')}` : ''}
         ${ss.pending.length ? `<div class="tm-queue-section">Waiting (${ss.pending.length})</div>${ss.pending.map(p => `<div class="tm-queue-item pending"><span>${p.priority === 0 ? '⚡' : p.priority === 2 ? '💤' : '○'}</span><span>${(p.task || '').slice(0,50)}${p.dependsOn?.length ? ' <span style="opacity:.5;font-size:11px">⏳ waiting for #' + p.dependsOn.join(', #') + '</span>' : ''}</span></div>`).join('')}` : ''}
@@ -1022,6 +1045,7 @@ ${css}
     EventBus.on('scheduler.finished', _tmRefresh)
     EventBus.on('scheduler.paused', _tmRefresh)
     EventBus.on('scheduler.aborted', _tmRefresh)
+    EventBus.on('intent.changed', _tmRefresh)
   }
 
   // Refresh all finder windows when FS changes
