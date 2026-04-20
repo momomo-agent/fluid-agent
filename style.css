@@ -838,3 +838,27 @@ select.settings-input { appearance: none; cursor: pointer; }
   #app { flex-direction: column; }
   #chat-panel { width: 100%; height: 50%; border-left: none; border-top: 1px solid var(--border-subtle); }
 }
+
+/* ── DynamicApp ── */
+.dapp-body { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.dapp-title { font-size: 18px; font-weight: 600; color: var(--text); }
+.dapp-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+.dapp-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 40px 0; }
+.dapp-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.dapp-field { background: var(--surface-raised); border-radius: 8px; padding: 12px; }
+.dapp-field-key { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.dapp-field-value { font-size: 14px; color: var(--text); word-break: break-word; }
+.dapp-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+.dapp-action-btn { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer; transition: all 0.15s; }
+.dapp-action-btn:hover { background: var(--surface-raised); }
+.dapp-action-btn.dapp-primary { background: var(--accent); color: white; border-color: var(--accent); }
+.dapp-action-btn.dapp-primary:hover { filter: brightness(1.1); }
+.dapp-action-btn.dapp-danger { color: #ff6b6b; border-color: #ff6b6b44; }
+.dapp-action-btn.dapp-danger:hover { background: #ff6b6b22; }
+.dapp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dapp-table th { text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--border); color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.dapp-table td { padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); }
+.dapp-table tr:hover td { background: var(--surface-raised); }
+.dapp-list-item { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
+.dapp-list-item:last-child { border-bottom: none; }
+.dapp-markdown { font-size: 13px; line-height: 1.6; white-space: pre-wrap; }

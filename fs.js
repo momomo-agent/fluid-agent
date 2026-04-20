@@ -6,7 +6,8 @@ const VFS = (() => {
   const root = makeDir('/')
   const listeners = []
 
-  function on(fn) { listeners.push(fn) }
+  function on(fn) { listeners.push(fn); return fn }
+  function off(fn) { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1) }
   function emit(event, path) { listeners.forEach(fn => fn(event, path)) }
 
   function resolve(path) {
@@ -208,6 +209,7 @@ const VFS = (() => {
     mkdir('/system/skills')
     mkdir('/system/tools')
     mkdir('/system/apps')
+    mkdir('/system/dynamic-apps')
     // Built-in app manifests
     writeBuiltinManifests()
     writeFile('/system/memory/MEMORY.md', '# Agent Memory\n\nThis is where I store what I learn about you and our conversations.\n\n## About You\n\n*(I\'ll fill this in as we talk)*\n\n## Preferences\n\n## Lessons Learned\n')
@@ -225,11 +227,12 @@ const VFS = (() => {
     }
     if (!isDir('/home/user/apps')) mkdir('/home/user/apps')
     if (!isDir('/tmp/apps')) mkdir('/tmp/apps')
+    if (!isDir('/system/dynamic-apps')) mkdir('/system/dynamic-apps')
   }
 
   function initDefaults() {
     createDefaults()
   }
 
-  return { resolve, mkdir, writeFile, readFile, ls, exists, isDir, isFile, rm, cp, mv, find, grep, normPath, on, save, load, init, initDefaults }
+  return { resolve, mkdir, writeFile, readFile, ls, exists, isDir, isFile, rm, cp, mv, find, grep, normPath, on, off, save, load, init, initDefaults }
 })()

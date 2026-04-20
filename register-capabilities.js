@@ -372,6 +372,28 @@
     handler: null // Special: wired up in agent.js (needs customSkills + parseSkillMd)
   })
 
+  Capabilities.register('dynamicapp', {
+    description: 'Create and manage dynamic workbench windows. The agent writes state files and the window auto-updates. Use open to create/reopen, list to see all, close to dismiss, destroy to delete.',
+    icon: '⚡',
+    category: 'Apps',
+    schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'close', 'destroy', 'list'] }, id: { type: 'string', description: 'App id (used as directory name)' }, title: { type: 'string' }, icon: { type: 'string' }, object: { type: 'object', description: 'Initial data object' }, actions: { type: 'array', description: 'Action buttons [{id, label, icon?, style?}]' }, view: { type: 'object', description: 'View config {template: "table"|"list"|"markdown"}' } }, required: ['action'] },
+    handler: ({ action, id, title, icon, object, actions, view }, ctx) => {
+      switch (action) {
+        case 'open': {
+          if (!id) return { error: 'id is required' }
+          // If already exists, reopen; otherwise create
+          const p = DynamicApp.paths(id)
+          if (VFS.isFile(p.meta)) return DynamicApp.open(id)
+          return DynamicApp.create(id, { title, icon, object, actions, view })
+        }
+        case 'close': return id ? DynamicApp.close(id) : { error: 'id is required' }
+        case 'destroy': return id ? DynamicApp.destroy(id) : { error: 'id is required' }
+        case 'list': return { apps: DynamicApp.list() }
+        default: return { error: `Unknown dynamicapp action: ${action}` }
+      }
+    }
+  })
+
   // ── Knowledge ──
   // These are registered but handlers are null — they get wired up by ExternalSkills or agent.js
 
