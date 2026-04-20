@@ -1,4 +1,4 @@
-/* dispatcher.js — Intent-driven Scheduler v3
+/* dispatcher.js - Intent-driven Scheduler v3
  *
  * Watches IntentState for changes, maps intent actions to scheduling decisions.
  * Maintains intentId → workerId mapping.
@@ -51,16 +51,19 @@ const Dispatcher = (() => {
       }
 
       case 'update': {
-        // Intent updated → steer existing Worker
+        // Intent updated → steer existing Worker with full context
         const workerId = _intentWorker.get(intent.id)
         if (workerId != null) {
           const w = _workers.get(workerId)
           if (w && w.status === 'running') {
-            // Steer the running worker with updated goal
+            // Build steer instruction from goal + recent messages
+            const context = intent.messages.length > 0
+              ? `Goal: ${intent.goal}\nUser messages: ${intent.messages.slice(-3).join(' → ')}`
+              : intent.goal
             w.task = intent.goal
-            EventBus.emit('dispatcher.steer', { workerId, instruction: intent.goal })
-            Scheduler.steer(w.schedulerTaskId || null, intent.goal)
-            console.log(`[Dispatcher] Steered Worker #${workerId} → "${intent.goal.slice(0, 60)}"`)
+            EventBus.emit('dispatcher.steer', { workerId, instruction: context })
+            Scheduler.steer(w.schedulerTaskId || null, context)
+            console.log(`[Dispatcher] Steered Worker #${workerId} → "${intent.goal.slice(0, 60)}"`)  
           } else {
             // Worker finished/not started yet — re-enqueue with updated goal
             Scheduler.enqueue(intent.goal, [], 1, [], { intentId: intent.id, workerId })
@@ -181,8 +184,8 @@ const Dispatcher = (() => {
       return { action: 'abort', workerId, reason: 'max_turns_exceeded' }
     }
     if (w.stallTurns >= STALL_THRESHOLD) {
-      _logDecision({ action: 'steer', workerId, instruction: '你似乎卡住了，尝试换个方法或总结当前进度' }, null, 'guardrail')
-      return { action: 'steer', workerId, instruction: '你似乎卡住了，尝试换个方法或总结当前进度' }
+      _logDecision({ action: 'steer', workerId, instruction: '你似乎卡住了,尝试换个方法或总结当前进度' }, null, 'guardrail')
+      return { action: 'steer', workerId, instruction: '你似乎卡住了,尝试换个方法或总结当前进度' }
     }
 
     return { action: 'continue' }

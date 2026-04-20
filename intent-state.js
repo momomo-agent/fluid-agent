@@ -53,8 +53,14 @@ const IntentState = (() => {
   function update(id, changes) {
     const intent = _intents[id]
     if (!intent) return null
-    if (changes.goal) intent.goal = changes.goal
+    // Append message to history (never lose context)
     if (changes.message) intent.messages.push(changes.message)
+    // Track goal evolution: keep previous goals
+    if (changes.goal && changes.goal !== intent.goal) {
+      if (!intent.goalHistory) intent.goalHistory = []
+      intent.goalHistory.push({ goal: intent.goal, at: Date.now() })
+      intent.goal = changes.goal
+    }
     intent.updatedAt = Date.now()
     _save()
     _notify('update', intent)
@@ -98,10 +104,13 @@ const IntentState = (() => {
     let out = '\n## Active Intents\n'
     for (const i of actv) {
       out += `- [${i.id}] "${i.goal}"`
-      if (i.messages.length > 0) out += ` (last: "${i.messages[i.messages.length - 1].slice(0, 40)}")`
+      if (i.messages.length > 0) {
+        const recent = i.messages.slice(-3).map(m => `"${m.slice(0, 30)}"`).join(' → ')
+        out += ` (history: ${recent})`
+      }
       out += '\n'
     }
-    out += '\nWhen the user\'s message relates to an existing intent, UPDATE it (same id). Only CREATE new intents for genuinely new goals.\n'
+    out += '\nWhen the user\'s message relates to an existing intent, UPDATE it (same id, include message + re-summarized goal). Only CREATE for genuinely new goals.\n'
     return out
   }
 

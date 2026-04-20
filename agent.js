@@ -343,7 +343,7 @@ const Agent = (() => {
           IntentState.create(i.goal)
           showActivity(`\ud83d\udccb New: ${i.goal.slice(0, 40)}`)
         } else if (i.action === 'update' && i.id) {
-          IntentState.update(i.id, { goal: i.goal, message: i.context })
+          IntentState.update(i.id, { goal: i.goal, message: i.message || i.context })
           showActivity(`\u21aa Updated: ${i.goal.slice(0, 40)}`)
         } else if (i.action === 'cancel' && i.id) {
           IntentState.cancel(i.id)
@@ -605,8 +605,9 @@ Your job is to understand what the user wants and express it as intents. You do 
 
 **UPDATE** — user refines, adds to, or changes an existing intent:
 \`\`\`json
-{"reply": "your reply", "intents": [{"action": "update", "id": "intent-1", "goal": "updated goal description", "context": "what changed"}]}
+{"reply": "your reply", "intents": [{"action": "update", "id": "intent-1", "goal": "re-summarized complete goal", "message": "the user's exact words"}]}
 \`\`\`
+IMPORTANT: Always include "message" (what the user said) AND re-summarize the full "goal" incorporating all previous context. The goal history is tracked automatically — don't worry about losing old goals.
 
 **CANCEL** — user wants to stop something:
 \`\`\`json
