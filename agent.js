@@ -6,7 +6,7 @@ const Agent = (() => {
 
   // --- Chat persistence via agentic glue ---
   const MAX_MESSAGES = 50
-  const SUMMARIZE_THRESHOLD = 40
+  const SUMMARIZE_THRESHOLD = 24
 
   async function saveChat() {
     if (!ai) return
@@ -161,9 +161,20 @@ const Agent = (() => {
     else opts.store = { name: 'fluid-agent' }
     opts.model = model || (provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o')
     if (baseUrl) opts.baseUrl = baseUrl
+    opts.embed = { provider: 'local', baseUrl: '/api' }
     const AgenticClass = typeof Agentic === 'function' ? Agentic : Agentic.Agentic
     ai = new AgenticClass(opts)
-    if (typeof Dispatcher !== 'undefined') Dispatcher.init(ai)
+    // configure call removed — embed passed via constructor
+    if (typeof Dispatcher !== 'undefined') Dispatcher.init(ai, storeInstance || null)
+
+    // Wire VFS events → ContextAssembler (dynamic attention)
+    if (typeof ContextAssembler !== 'undefined') {
+      VFS.on((event, path) => {
+        if (!path.startsWith('/system/logs')) {  // avoid noise
+          ContextAssembler.logEvent(event, path)
+        }
+      })
+    }
   }
 
   function showActivity(text) {
@@ -333,40 +344,41 @@ const Agent = (() => {
     try {
       const os = getOsState()
 
+      // Dynamic attention: assemble relevant context from VFS
+      const dynamicContext = typeof ContextAssembler !== 'undefined'
+        ? await ContextAssembler.assemble(userMessage, ai)
+        : ''
+
       // --- Unified dispatch function (used by both streaming and post-parse) ---
       function _dispatchAction(action, userMsg) {
+        // Determine priority from action block
+        const priority = action.priority === 'urgent' ? 'urgent'
+          : action.priority === 'background' ? 'background' : 'normal'
+
         if (action.action === 'execute' || action.action === 'redirect') {
           if (typeof Dispatcher !== 'undefined') {
-            Dispatcher.handleIntent(action).then(decision => {
-              if (decision.action === 'new') {
-                enqueueTask(decision.task || action.task || userMsg, decision.steps || action.steps, decision.priority ?? action.priority ?? 1)
-              } else if (decision.action === 'steer' && decision.workerId) {
-                Dispatcher.pushIntent({ action: 'steer', instruction: decision.instruction })
-                showActivity(`↪ Steering #${decision.workerId}: ${(decision.instruction || '').slice(0, 40)}`)
-              } else if (decision.action === 'abort') {
-                Scheduler.abort(decision.workerId || null)
-                setWorkerStatus('')
-                showActivity('Tasks cleared')
-              } else {
-                // Fallback: Dispatcher returned noop/continue but Talker said execute — don't drop it
-                enqueueTask(action.task || userMsg, action.steps || [], action.priority ?? 1)
-              }
-            }).catch(err => {
-              console.error('[Dispatcher] error:', err.message)
-              // On error, still create the task so it's not lost
+            // Route through IntentQueue → Dispatcher
+            Dispatcher.handleIntent(action, priority)
+            // If no Workers running, trigger immediate scheduling
+            const state = Dispatcher.getState()
+            if (state.running.length === 0) {
               enqueueTask(action.task || userMsg, action.steps || [], action.priority ?? 1)
-            })
+            }
+            // Otherwise Dispatcher will handle at next checkpoint
           } else {
             enqueueTask(action.task || userMsg, action.steps, action.priority ?? 1)
           }
         } else if (action.action === 'steer') {
           if (typeof Dispatcher !== 'undefined') {
-            Dispatcher.pushIntent({ action: 'steer', instruction: action.instruction })
+            Dispatcher.handleIntent({ action: 'steer', instruction: action.instruction }, priority)
           } else {
             blackboard.directive = { type: 'steer', instruction: action.instruction }
           }
           showActivity(`↪ Steering: ${action.instruction?.slice(0, 40)}`)
         } else if (action.action === 'abort') {
+          if (typeof Dispatcher !== 'undefined') {
+            Dispatcher.handleIntent({ action: 'abort' }, 'urgent')
+          }
           Scheduler.abort(null)
           setWorkerStatus('')
           showActivity('Tasks cleared')
@@ -412,7 +424,7 @@ const Agent = (() => {
       }
 
       const result = await ai.think(userMessage, {
-        system: buildTalkerSystem(os),
+        system: buildTalkerSystem(os, dynamicContext),
         stream: true,
         history: messages.slice(-21, -1),
         tools: [],
@@ -519,23 +531,21 @@ const Agent = (() => {
     return cleaned.trim()
   }
 
-  function buildTalkerSystem(os) {
+  function buildTalkerSystem(os, dynamicContext) {
     const schedulerState = Scheduler.getState()
     const runningTasks = schedulerState.running
     const queuedCount = schedulerState.pending.length
 
-    // Read agent memory from VFS
-    const memory = VFS.isFile('/system/memory/MEMORY.md') ? VFS.readFile('/system/memory/MEMORY.md') : ''
-    const context = VFS.isFile('/system/memory/context.md') ? VFS.readFile('/system/memory/context.md') : ''
+    // Soul is always loaded (identity)
     const soul = VFS.isFile('/system/SOUL.md') ? VFS.readFile('/system/SOUL.md') : ''
+    // Memory/context now handled by ContextAssembler (dynamic attention)
 
     let sys = `You are Fluid Agent — part companion, part operating system.
 
 You're a conversational AI that also happens to control an entire desktop environment. Most of the time, you're just talking — answering questions, discussing ideas, brainstorming, being helpful and interesting. When the user wants something done (open a file, play music, build an app), you make it happen.
 
 ${soul ? `## Your Soul\n${soul}\n` : ''}
-${memory ? `## Your Memory\n${memory}\n` : ''}
-${context ? `## Recent Context\n${context}\n` : ''}
+${dynamicContext ? `## Current Context\n${dynamicContext}\n` : ''}
 
 Know the difference:
 - "What do you think about X?" → Just talk. Have opinions. Be thoughtful.
@@ -915,12 +925,15 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
           turnCount,
           lastTool: turn.toolCalls[0]?.name || null,
           lastResult: turn.text?.slice(0, 100) || null,
+          lastResultSummary: turn.text?.slice(0, 100) || '',
+          messages: workerMessages,
+          tools: Object.keys(allHandlers),
+          system: workerSystem,
+          totalTokens: (Dispatcher.getWorker(workerId)?.totalTokens || 0) + (turn.usage?.totalTokens || 0),
+          toolCallCount: (Dispatcher.getWorker(workerId)?.toolCallCount || 0) + turn.toolCalls.length,
         })
 
-        const postDecision = await Dispatcher.afterTurn(workerId, {
-          lastTool: turn.toolCalls[0]?.name || null,
-          summary: turn.text?.slice(0, 100),
-        })
+        const postDecision = await Dispatcher.afterTurn(workerId, turn)
         if (postDecision?.action === 'abort') throw new Error('aborted')
         if (postDecision?.action === 'steer' && postDecision.instruction) {
           workerMessages.push({ role: 'user', content: `[DIRECTION CHANGE] ${postDecision.instruction}` })
@@ -1169,8 +1182,11 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
 
     try {
       const os = getOsState()
+      const dynamicCtx = typeof ContextAssembler !== 'undefined'
+        ? await ContextAssembler.assemble(userMessage, ai)
+        : ''
       const result = await ai.think(userMessage, {
-        system: buildTalkerSystem(os),
+        system: buildTalkerSystem(os, dynamicCtx),
         stream: true,
         history: messages.slice(-21, -1),
         tools: [],

@@ -1,75 +1,347 @@
-/* dispatcher.js — LLM-powered turn-level scheduler
+/* dispatcher.js — Runtime Scheduler v2
+ *
+ * Observe → Decide → Act pattern with:
+ *   - IntentQueue for priority-based intent management
+ *   - CheckpointStore for turn-level persistence
+ *   - Fast path (deterministic rules) + Slow path (LLM decisions)
  *
  * Three roles: Talker (shell) → Dispatcher (kernel) → Worker (process)
- *
- * Dispatcher decides what happens between Worker turns:
- *   - continue: let the Worker keep going
- *   - steer: inject new instruction into Worker's context
- *   - suspend: pause Worker, free the slot
- *   - resume: resume a suspended Worker
- *   - abort: kill a Worker
- *   - new: create a new Worker
- *   - noop: do nothing
- *
- * All decisions go through LLM — no fast/slow path split.
  */
 const Dispatcher = (() => {
   let _ai = null
-  const _pendingIntents = []  // Talker's intents, consumed by Dispatcher
+  let _store = null
   const _workers = new Map()  // workerId → Worker state
+  const _decisionLog = []     // last N decisions for debugging
+  const MAX_LOG = 50
+  const MAX_TURNS = 30        // guardrail: max turns per Worker
+  const STALL_THRESHOLD = 5   // guardrail: consecutive no-output turns
 
   let _nextWorkerId = 1
 
-  function init(ai) { _ai = ai }
+  function init(ai, store) {
+    _ai = ai
+    _store = store
+    if (store) CheckpointStore.init(store)
+  }
 
-  // --- Worker Registry ---
+  // ═══════════════════════════════════════════════════════════════
+  // Worker Registry
+  // ═══════════════════════════════════════════════════════════════
 
-  function registerWorker(id, task, steps) {
+  function registerWorker(id, task, steps, { priority = 1, messages = [], tools = [], system = '' } = {}) {
     _workers.set(id, {
       id,
       task,
       steps,
-      status: 'running',    // running | suspended | done | error | aborted
+      status: 'running',
       turnCount: 0,
+      stallTurns: 0,
       lastTool: null,
       lastResult: null,
-      priority: 1,
+      lastResultSummary: '',
+      priority,
       createdAt: Date.now(),
       suspendedAt: null,
+      messages,
+      tools,
+      system,
+      completedSteps: [],
+      totalTokens: 0,
+      toolCallCount: 0,
     })
   }
 
   function updateWorker(id, update) {
     const w = _workers.get(id)
-    if (w) Object.assign(w, update)
+    if (!w) return
+    Object.assign(w, update)
+
+    // Track stall
+    if (update.lastResult) {
+      w.stallTurns = 0
+    } else if (update.turnCount > w.turnCount) {
+      w.stallTurns++
+    }
   }
 
-  function removeWorker(id) {
-    _workers.delete(id)
+  function removeWorker(id) { _workers.delete(id) }
+  function getWorker(id) { return _workers.get(id) }
+  function nextWorkerId() { return _nextWorkerId++ }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Step 1: OBSERVE — Pure data collection, no LLM
+  // ═══════════════════════════════════════════════════════════════
+
+  function observe(trigger = 'turn_complete') {
+    return {
+      timestamp: Date.now(),
+      trigger,  // 'turn_complete' | 'new_intent' | 'error' | 'worker_done'
+
+      workers: Array.from(_workers.values()).map(w => ({
+        id: w.id,
+        task: w.task.slice(0, 80),
+        status: w.status,
+        turnCount: w.turnCount,
+        maxTurns: MAX_TURNS,
+        lastTool: w.lastTool,
+        lastResultSummary: (w.lastResultSummary || '').slice(0, 100),
+        elapsed: Math.round((Date.now() - w.createdAt) / 1000),
+        stallTurns: w.stallTurns,
+        priority: w.priority,
+      })),
+
+      intents: IntentQueue.getState().slice(0, 5),
+
+      resources: {
+        activeSlots: Array.from(_workers.values()).filter(w => w.status === 'running').length,
+        maxSlots: Scheduler.MAX_SLOTS,
+        pendingCount: IntentQueue.size(),
+      },
+    }
   }
 
-  function nextWorkerId() {
-    return _nextWorkerId++
+  // ═══════════════════════════════════════════════════════════════
+  // Step 2: DECIDE — Fast path first, then LLM
+  // ═══════════════════════════════════════════════════════════════
+
+  function fastPath(obs) {
+    // Rule 1: Single Worker, no intents, just completed a turn → continue
+    if (obs.workers.length === 1 && obs.intents.length === 0 &&
+        obs.trigger === 'turn_complete' && obs.workers[0].status === 'running') {
+      return { action: 'continue', reason: 'single_worker_no_intent' }
+    }
+
+    // Rule 2: Worker reported done → cleanup
+    const doneWorker = obs.workers.find(w => w.status === 'done')
+    if (doneWorker) {
+      return { action: 'cleanup', workerId: doneWorker.id, reason: 'worker_done' }
+    }
+
+    // Rule 3: Urgent intent + single running Worker → immediate steer
+    if (obs.intents.length > 0 && obs.intents[0].priority === 'urgent') {
+      const running = obs.workers.filter(w => w.status === 'running')
+      if (running.length === 1) {
+        const intent = IntentQueue.dequeue()
+        return { action: 'steer', workerId: running[0].id, instruction: intent?.intent?.task || intent?.intent, reason: 'urgent_intent' }
+      }
+    }
+
+    // Rule 4: Worker exceeded max turns → force abort
+    const overLimit = obs.workers.find(w => w.turnCount >= w.maxTurns && w.status === 'running')
+    if (overLimit) {
+      return { action: 'abort', workerId: overLimit.id, reason: 'max_turns_exceeded' }
+    }
+
+    // Rule 5: Worker stalled → steer
+    const stalled = obs.workers.find(w => w.stallTurns >= STALL_THRESHOLD && w.status === 'running')
+    if (stalled) {
+      return { action: 'steer', workerId: stalled.id, instruction: '你似乎卡住了，尝试换个方法或总结当前进度', reason: 'stall_detected' }
+    }
+
+    // Rule 6: No running Workers + has pending intents → spawn new
+    const running = obs.workers.filter(w => w.status === 'running')
+    if (running.length === 0 && obs.intents.length > 0 && obs.resources.activeSlots < obs.resources.maxSlots) {
+      const intent = IntentQueue.dequeue()
+      if (intent) {
+        return { action: 'new', task: intent.intent?.task || intent.intent, priority: intent.priority, reason: 'idle_with_intent' }
+      }
+    }
+
+    return null  // Need LLM decision
   }
 
-  // --- Intent Queue (Talker → Dispatcher) ---
+  async function decide(observation) {
+    // Try fast path first
+    const fast = fastPath(observation)
+    if (fast) {
+      _logDecision(fast, observation, 'fast')
+      return fast
+    }
 
-  function pushIntent(intent) {
-    _pendingIntents.push({ ...intent, time: Date.now() })
+    // Slow path: LLM decision
+    if (!_ai) return { action: 'continue', reason: 'no_ai_fallback' }
+
+    try {
+      const prompt = buildDecisionPrompt(observation)
+      const resp = await _ai.step(
+        [{ role: 'user', content: prompt }],
+        { system: DISPATCHER_SYSTEM, stream: false }
+      )
+
+      const text = resp?.content || resp?.text || (typeof resp === 'string' ? resp : '')
+      const jsonMatch = text.match(/\{[\s\S]*?\}/)
+      if (!jsonMatch) return { action: 'continue', reason: 'parse_failed' }
+
+      const decision = JSON.parse(jsonMatch[0])
+      _logDecision(decision, observation, 'llm')
+      return decision
+    } catch (err) {
+      console.error('[Dispatcher.decide] LLM error:', err.message)
+      return { action: 'continue', reason: 'llm_error' }
+    }
   }
 
-  function drainIntents() {
-    const intents = [..._pendingIntents]
-    _pendingIntents.length = 0
-    return intents
+  // ═══════════════════════════════════════════════════════════════
+  // Step 3: ACT — Execute the decision
+  // ═══════════════════════════════════════════════════════════════
+
+  async function act(decision) {
+    switch (decision.action) {
+      case 'continue':
+        break
+
+      case 'new':
+        EventBus.emit('dispatcher.new', { task: decision.task, priority: decision.priority })
+        break
+
+      case 'steer':
+        EventBus.emit('dispatcher.steer', { workerId: decision.workerId, instruction: decision.instruction })
+        break
+
+      case 'suspend': {
+        const w = _workers.get(decision.workerId)
+        if (w) {
+          w.status = 'suspended'
+          w.suspendedAt = Date.now()
+          EventBus.emit('dispatcher.suspend', { workerId: decision.workerId })
+        }
+        break
+      }
+
+      case 'resume': {
+        const w = _workers.get(decision.workerId)
+        if (w) {
+          w.status = 'running'
+          w.suspendedAt = null
+          EventBus.emit('dispatcher.resume', { workerId: decision.workerId })
+        }
+        break
+      }
+
+      case 'abort':
+        EventBus.emit('dispatcher.abort', { workerId: decision.workerId, reason: decision.reason })
+        break
+
+      case 'cleanup':
+        removeWorker(decision.workerId)
+        if (_store) await CheckpointStore.markDone(String(decision.workerId))
+        break
+
+      case 'parallel':
+        if (decision.tasks) {
+          for (const t of decision.tasks) {
+            EventBus.emit('dispatcher.new', { task: t.task || t, priority: t.priority || 1 })
+          }
+        }
+        break
+    }
   }
 
-  // --- State Summary (for Talker's system prompt) ---
+  // ═══════════════════════════════════════════════════════════════
+  // Main entry points (called by Worker turn loop)
+  // ═══════════════════════════════════════════════════════════════
+
+  // Called before each Worker turn
+  async function beforeTurn(workerId) {
+    // GC the intent queue
+    IntentQueue.gc()
+
+    // If urgent intent exists, fast-decide
+    if (IntentQueue.hasUrgent()) {
+      const obs = observe('new_intent')
+      const decision = await decide(obs)
+      if (decision.action !== 'continue') {
+        await act(decision)
+        return decision
+      }
+    }
+
+    return { action: 'continue' }
+  }
+
+  // Called after each Worker turn
+  async function afterTurn(workerId, turnResult) {
+    const w = _workers.get(workerId)
+    if (!w) return { action: 'continue' }
+
+    // Update Worker state
+    w.turnCount++
+    if (turnResult.toolCalls?.length) {
+      w.lastTool = turnResult.toolCalls[0].name
+      w.toolCallCount += turnResult.toolCalls.length
+      w.stallTurns = 0
+    }
+    if (turnResult.text) {
+      w.lastResultSummary = turnResult.text.slice(0, 100)
+      w.stallTurns = 0
+    }
+
+    // Save checkpoint
+    if (_store) {
+      const checkpoint = CheckpointStore.buildCheckpoint(w, {
+        intentQueue: IntentQueue.getState(),
+        workers: Array.from(_workers.values()).map(wk => ({ id: wk.id, task: wk.task, status: wk.status })),
+        decisionLog: _decisionLog.slice(-10),
+      })
+      await CheckpointStore.save(String(workerId), w.turnCount, checkpoint)
+    }
+
+    // Observe → Decide → Act
+    const obs = observe('turn_complete')
+    const decision = await decide(obs)
+    await act(decision)
+    return decision
+  }
+
+  // Called when Talker produces an intent
+  function handleIntent(intent, priority = 'normal') {
+    IntentQueue.enqueue(intent, { priority, source: 'talker' })
+
+    // Urgent intents trigger immediate scheduling
+    if (priority === 'urgent') {
+      EventBus.emit('dispatcher.urgent', { intent })
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Resume from checkpoint (page reload / crash recovery)
+  // ═══════════════════════════════════════════════════════════════
+
+  async function checkForResume() {
+    if (!_store) return []
+    const unfinished = await CheckpointStore.listUnfinished()
+    return unfinished
+  }
+
+  async function resumeWorker(workerId) {
+    const checkpoint = await CheckpointStore.restoreLatest(String(workerId))
+    if (!checkpoint) return null
+
+    // Re-register Worker with saved state
+    registerWorker(workerId, checkpoint.task, checkpoint.worker.steps, {
+      priority: 1,
+      messages: checkpoint.worker.messages,
+      tools: checkpoint.worker.tools,
+      system: checkpoint.worker.system,
+    })
+
+    const w = _workers.get(workerId)
+    if (w) {
+      w.turnCount = checkpoint.turnIndex
+      w.completedSteps = checkpoint.worker.completedSteps
+    }
+
+    EventBus.emit('dispatcher.resumed', { workerId, fromTurn: checkpoint.turnIndex })
+    return checkpoint
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // State & Formatting (for Talker's system prompt)
+  // ═══════════════════════════════════════════════════════════════
 
   function getStateSummary() {
-    const workers = []
-    for (const [id, w] of _workers) {
-      workers.push({
+    return {
+      workers: Array.from(_workers.values()).map(w => ({
         id: w.id,
         task: w.task.slice(0, 60),
         status: w.status,
@@ -77,200 +349,49 @@ const Dispatcher = (() => {
         lastTool: w.lastTool,
         priority: w.priority,
         elapsed: Math.round((Date.now() - w.createdAt) / 1000),
-      })
+      })),
+      intents: IntentQueue.getState(),
+      freeSlots: Scheduler.MAX_SLOTS - Array.from(_workers.values()).filter(w => w.status === 'running').length,
     }
-    const schedulerState = Scheduler.getState()
+  }
+
+  function getState() {
+    const s = getStateSummary()
     return {
-      workers,
-      pending: schedulerState.pending.length,
-      slotsUsed: schedulerState.running.length,
-      slotsMax: Scheduler.MAX_SLOTS,
+      running: s.workers.filter(w => w.status === 'running'),
+      pending: s.workers.filter(w => w.status === 'suspended'),
+      intents: s.intents,
     }
   }
 
-  // Format for injection into Talker's system prompt
   function formatForTalker() {
-    const state = getStateSummary()
-    if (state.workers.length === 0 && state.pending === 0) return ''
+    const s = getStateSummary()
+    if (s.workers.length === 0 && s.intents.length === 0) return ''
 
-    let s = '\nDISPATCH STATE:'
-    if (state.workers.length > 0) {
-      s += '\n- Workers: ' + state.workers.map(w =>
-        `#${w.id} "${w.task}"(${w.status}, turn ${w.turnCount}${w.lastTool ? ', last: ' + w.lastTool : ''}, ${w.elapsed}s)`
-      ).join(' | ')
+    let out = 'DISPATCH STATE:\n'
+    if (s.workers.length) {
+      out += '- Workers: ' + s.workers.map(w =>
+        `#${w.id} "${w.task}"(${w.status}, turn ${w.turnCount}, ${w.elapsed}s)`
+      ).join(' | ') + '\n'
     }
-    s += `\n- Slots: ${state.slotsUsed}/${state.slotsMax} used`
-    if (state.pending > 0) s += `\n- Queue: ${state.pending} pending`
-    return s
+    if (s.intents.length) {
+      out += `- Queue: ${s.intents.length} intent(s)\n`
+    }
+    out += `- Slots: ${Scheduler.MAX_SLOTS - s.freeSlots}/${Scheduler.MAX_SLOTS} used\n`
+    return out
   }
 
-  // --- Core: LLM-based dispatch decision ---
+  // ═══════════════════════════════════════════════════════════════
+  // Batch planning (multi-intent decomposition)
+  // ═══════════════════════════════════════════════════════════════
 
-  async function decide(trigger, context) {
-    if (!_ai) return { action: 'continue' }
-
-    const state = getStateSummary()
-    const intents = drainIntents()
-
-    // Build context for Dispatcher LLM
-    const workerSummary = state.workers.map(w =>
-      `#${w.id} "${w.task}" — ${w.status}, turn ${w.turnCount}, last tool: ${w.lastTool || 'none'}, elapsed: ${w.elapsed}s, priority: ${w.priority}`
-    ).join('\n  ') || '(none)'
-
-    const intentSummary = intents.length > 0
-      ? intents.map(i => JSON.stringify(i)).join('\n  ')
-      : '(none)'
-
-    const prompt = `Trigger: ${trigger}
-${context ? `Context: ${context}` : ''}
-
-Workers:
-  ${workerSummary}
-
-Pending queue: ${state.pending} tasks
-Slots: ${state.slotsUsed}/${state.slotsMax}
-
-New intents from Talker:
-  ${intentSummary}
-
-Decide what to do. Output ONLY valid JSON:`
-
-    const system = `You are the scheduler of Fluid Agent OS. You manage Worker processes.
-
-Each Worker runs a task using tools, one turn at a time. Between turns, you decide:
-- "continue" — let the Worker keep going (default if nothing needs changing)
-- "steer" — inject a new instruction into the Worker's next turn (workerId + instruction required)
-- "suspend" — pause a Worker to free a slot (workerId required)
-- "resume" — resume a suspended Worker (workerId required)
-- "abort" — kill a Worker (workerId required)
-- "new" — create a new Worker for a new task (task + steps required)
-- "reorder" — change priority of a Worker (workerId + priority required)
-- "noop" — do nothing (for pure conversation, no task impact)
-
-Output JSON:
-{"action": "continue"}
-{"action": "steer", "workerId": 1, "instruction": "focus on the intro section"}
-{"action": "suspend", "workerId": 2}
-{"action": "resume", "workerId": 2}
-{"action": "abort", "workerId": 1}
-{"action": "new", "task": "...", "steps": ["..."], "priority": 1}
-{"action": "reorder", "workerId": 1, "priority": 0}
-{"action": "noop"}
-
-Rules:
-- If no intents and Worker is progressing normally → "continue"
-- If Talker intent relates to a running Worker → "steer" that Worker
-- If Talker intent is a new unrelated task → "new"
-- If user says stop/cancel → "abort"
-- Urgent tasks (priority 0) can preempt background tasks (priority 2) via "suspend" + "new"
-- Be decisive. One action per decision.`
-
-    try {
-      const result = await _ai.think(prompt, {
-        system,
-        stream: false,
-        history: [],
-        tools: [],
-      })
-      const text = typeof result === 'string' ? result
-        : result?.answer ?? result?.content ?? JSON.stringify(result)
-      const json = text.match(/\{[\s\S]*?\}/)
-      if (json) return JSON.parse(json[0])
-    } catch (e) {
-      console.warn('[Dispatcher] LLM error:', e.message)
-    }
-    return { action: 'continue' }
-  }
-
-  // --- Checkpoint: called between Worker turns ---
-
-  async function beforeTurn(workerId) {
-    const w = _workers.get(workerId)
-    if (!w) return { action: 'continue' }
-
-    // Only call LLM if there are pending intents or multiple workers
-    const hasIntents = _pendingIntents.length > 0
-    const multiWorker = _workers.size > 1
-
-    if (!hasIntents && !multiWorker) {
-      // Simple case: single worker, no new intents → just continue
-      return { action: 'continue' }
-    }
-
-    const decision = await decide(
-      `Worker #${workerId} about to start turn ${w.turnCount + 1}`,
-      `Task: "${w.task}", last tool: ${w.lastTool || 'none'}`
-    )
-
-    return decision
-  }
-
-  async function afterTurn(workerId, turnResult) {
-    const w = _workers.get(workerId)
-    if (!w) return
-
-    w.turnCount++
-    w.lastTool = turnResult.lastTool || null
-    w.lastResult = turnResult.summary || null
-
-    // Check if there are pending intents that need immediate attention
-    if (_pendingIntents.length > 0) {
-      const decision = await decide(
-        `Worker #${workerId} completed turn ${w.turnCount}`,
-        `Tool used: ${w.lastTool || 'none'}, result: ${(w.lastResult || '').slice(0, 100)}`
-      )
-      return decision
-    }
-  }
-
-  // --- Handle Talker intent (called when Talker outputs an action block) ---
-
-  async function handleIntent(intent) {
-    pushIntent(intent)
-
-    // If no workers running, fast-path: just return the intent as-is
-    if (_workers.size === 0) {
-      drainIntents()  // consume it
-      if (intent.action === 'execute') {
-        return { action: 'new', task: intent.task, steps: intent.steps || [], priority: intent.priority || 1 }
-      }
-      if (intent.action === 'abort') {
-        return { action: 'abort', workerId: null }
-      }
-      return { action: 'noop' }
-    }
-
-    // Workers running — need LLM to decide
-    return decide(`New intent from Talker`, `Intent: ${JSON.stringify(intent)}`)
-  }
-
-  // --- Batch Planning: analyze multiple intents for dependencies and merging ---
   async function planBatch(intents) {
-    if (!_ai || intents.length === 0) return null
-    if (intents.length === 1) {
-      return { tasks: [{ index: intents[0].index, task: intents[0].task, steps: intents[0].steps, priority: intents[0].priority, dependsOn: [] }] }
-    }
+    if (!_ai || !intents.length) return null
 
     try {
-      const resp = await _ai.think(
-        `Analyze these ${intents.length} tasks for dependencies and merge opportunities:\n\n${intents.map((t, i) => `[${t.index}] ${t.task}`).join('\n')}`,
-        {
-          system: `You are the Dispatcher of Fluid Agent OS. Given a batch of tasks from the user, analyze them and output a dependency plan.
-
-Rules:
-- Tasks that depend on another task's output must list that dependency (e.g., "create folder X" must finish before "write file in X")
-- Independent tasks can run in parallel (no dependencies)
-- Tasks that are nearly identical can be merged into one (e.g., "create file A" + "create file B" → "create files A and B")
-- Preserve the original index for tracking
-
-Respond with JSON only:
-{"tasks": [{"index": 0, "task": "description", "steps": [], "priority": 1, "dependsOn": []}, ...]}
-
-dependsOn contains indices of tasks this one depends on. Empty array = no dependencies = can run immediately.
-If merging tasks, use the lowest index and list all merged indices in "mergedFrom".
-Keep it minimal — don't over-complicate simple independent tasks.`,
-          stream: false,
-        }
+      const resp = await _ai.step(
+        [{ role: 'user', content: `Plan these tasks:\n${JSON.stringify(intents.map(i => i.intent))}` }],
+        { system: PLANNER_SYSTEM, stream: false }
       )
 
       const text = resp?.content || resp?.text || (typeof resp === 'string' ? resp : '')
@@ -278,8 +399,6 @@ Keep it minimal — don't over-complicate simple independent tasks.`,
       if (!jsonMatch) return null
       const plan = JSON.parse(jsonMatch[0])
       if (!plan.tasks || !Array.isArray(plan.tasks)) return null
-
-      console.log(`[Dispatcher.planBatch] Planned ${plan.tasks.length} tasks from ${intents.length} intents`)
       return plan
     } catch (err) {
       console.error('[Dispatcher.planBatch] Error:', err.message)
@@ -287,13 +406,78 @@ Keep it minimal — don't over-complicate simple independent tasks.`,
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // Internal helpers
+  // ═══════════════════════════════════════════════════════════════
+
+  function _logDecision(decision, observation, path) {
+    _decisionLog.push({
+      ...decision,
+      path,
+      trigger: observation.trigger,
+      at: Date.now(),
+    })
+    if (_decisionLog.length > MAX_LOG) _decisionLog.shift()
+  }
+
+  function buildDecisionPrompt(obs) {
+    return `## System State (Observation)
+
+\`\`\`json
+${JSON.stringify(obs, null, 2)}
+\`\`\`
+
+Based on this state, decide the next action.`
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // System prompts
+  // ═══════════════════════════════════════════════════════════════
+
+  const DISPATCHER_SYSTEM = `You are Fluid OS's runtime scheduler. You manage Worker lifecycle.
+
+You receive a JSON Observation (system state snapshot) and output a single JSON Action.
+
+Available Actions:
+- {"action": "continue"} — current Worker keeps executing
+- {"action": "new", "task": "...", "priority": 1} — spawn new Worker
+- {"action": "steer", "workerId": N, "instruction": "..."} — inject instruction into Worker
+- {"action": "suspend", "workerId": N} — pause Worker, free slot
+- {"action": "resume", "workerId": N} — resume suspended Worker
+- {"action": "abort", "workerId": N, "reason": "..."} — kill Worker
+- {"action": "parallel", "tasks": [{"task": "...", "priority": 1}, ...]} — spawn multiple Workers
+
+Decision principles:
+1. User intent takes priority over system efficiency
+2. Urgent intents must be handled within 1 turn
+3. When uncertain, choose "continue" (conservative)
+4. Parallelize when possible, but respect maxSlots
+5. Stalled Workers (stallTurns >= 5) need intervention
+
+Output JSON only. No explanation.`
+
+  const PLANNER_SYSTEM = `You decompose multiple user intents into an execution plan.
+
+Rules:
+- Tasks that depend on another's output must list that dependency
+- Independent tasks can run in parallel (no dependencies)
+- Nearly identical tasks can be merged
+- Preserve original index for tracking
+
+Output JSON:
+{"tasks": [{"index": 0, "task": "description", "steps": [], "priority": 1, "dependsOn": []}, ...]}
+
+dependsOn contains indices of tasks this one depends on. Empty = can run immediately.
+Keep it minimal.`
+
   return {
-    init, registerWorker, updateWorker, removeWorker, nextWorkerId,
-    pushIntent, drainIntents,
-    getStateSummary, getState: () => {
-      const s = getStateSummary()
-      return { running: s.workers.filter(w => w.status === 'running'), pending: s.workers.filter(w => w.status === 'suspended') }
-    }, formatForTalker,
-    decide, beforeTurn, afterTurn, handleIntent, planBatch,
+    init, registerWorker, updateWorker, removeWorker, getWorker, nextWorkerId,
+    handleIntent,
+    observe, decide, act,
+    beforeTurn, afterTurn,
+    checkForResume, resumeWorker,
+    getStateSummary, getState, formatForTalker,
+    planBatch,
+    get decisionLog() { return _decisionLog },
   }
 })()
