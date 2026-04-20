@@ -166,6 +166,7 @@ const Agent = (() => {
     ai = new AgenticClass(opts)
     // configure call removed — embed passed via constructor
     if (typeof Dispatcher !== 'undefined') Dispatcher.init(ai, storeInstance || null)
+    if (typeof IntentState !== 'undefined') IntentState.init()
 
     // Wire VFS events → ContextAssembler (dynamic attention)
     if (typeof ContextAssembler !== 'undefined') {
@@ -333,6 +334,58 @@ const Agent = (() => {
     }
   }
 
+  // --- Intent dispatch helpers (module scope, used by chat + batch) ---
+  function _dispatchIntent(parsed) {
+    if (!parsed) return
+    if (parsed.intents && Array.isArray(parsed.intents)) {
+      for (const i of parsed.intents) {
+        if (i.action === 'create') {
+          IntentState.create(i.goal)
+          showActivity(`\ud83d\udccb New: ${i.goal.slice(0, 40)}`)
+        } else if (i.action === 'update' && i.id) {
+          IntentState.update(i.id, { goal: i.goal, message: i.context })
+          showActivity(`\u21aa Updated: ${i.goal.slice(0, 40)}`)
+        } else if (i.action === 'cancel' && i.id) {
+          IntentState.cancel(i.id)
+          showActivity('Cancelled')
+        } else if (i.action === 'done' && i.id) {
+          IntentState.done(i.id)
+        }
+      }
+    }
+    if (parsed.remember) {
+      const memPath = '/system/memory/MEMORY.md'
+      let mem = VFS.isFile(memPath) ? VFS.readFile(memPath) : '# Agent Memory\n'
+      const section = parsed.remember.section || 'Lessons Learned'
+      const sectionHeader = `## ${section}`
+      if (mem.includes(sectionHeader)) {
+        mem = mem.replace(sectionHeader, `${sectionHeader}\n- ${parsed.remember.entry}`)
+      } else {
+        mem += `\n${sectionHeader}\n- ${parsed.remember.entry}\n`
+      }
+      VFS.writeFile(memPath, mem)
+      showActivity('Memory updated')
+    }
+  }
+
+  function _legacyToIntent(action, userMsg) {
+    if (action.action === 'execute' || action.action === 'redirect') {
+      return { intents: [{ action: 'create', goal: action.task || userMsg }] }
+    } else if (action.action === 'steer') {
+      const active = typeof IntentState !== 'undefined' ? IntentState.active() : []
+      if (active.length > 0) {
+        return { intents: [{ action: 'update', id: active[active.length - 1].id, goal: action.instruction }] }
+      }
+      return { intents: [{ action: 'create', goal: action.instruction }] }
+    } else if (action.action === 'abort') {
+      const active = typeof IntentState !== 'undefined' ? IntentState.active() : []
+      return { intents: active.map(i => ({ action: 'cancel', id: i.id })) }
+    } else if (action.action === 'remember' && action.memory) {
+      return { remember: { entry: action.memory, section: action.section } }
+    }
+    return null
+  }
+
   async function chat(userMessage) {
     addBubble('user', userMessage)
     messages.push({ role: 'user', content: userMessage })
@@ -350,47 +403,8 @@ const Agent = (() => {
         : ''
 
       // --- Unified dispatch function (used by both streaming and post-parse) ---
-      function _dispatchAction(action, userMsg) {
-        // Determine priority from action block
-        const priority = action.priority === 'urgent' ? 'urgent'
-          : action.priority === 'background' ? 'background' : 'normal'
-
-        if (action.action === 'execute' || action.action === 'redirect') {
-          if (typeof Dispatcher !== 'undefined') {
-            // Route through Scheduler only (Dispatcher observes via afterTurn).
-            // Don't double-enqueue via IntentQueue + Scheduler.
-            enqueueTask(action.task || userMsg, action.steps || [], action.priority ?? 1)
-          } else {
-            enqueueTask(action.task || userMsg, action.steps, action.priority ?? 1)
-          }
-        } else if (action.action === 'steer') {
-          if (typeof Dispatcher !== 'undefined') {
-            Dispatcher.handleIntent({ action: 'steer', instruction: action.instruction }, priority)
-          } else {
-            blackboard.directive = { type: 'steer', instruction: action.instruction }
-          }
-          showActivity(`↪ Steering: ${action.instruction?.slice(0, 40)}`)
-        } else if (action.action === 'abort') {
-          if (typeof Dispatcher !== 'undefined') {
-            Dispatcher.handleIntent({ action: 'abort' }, 'urgent')
-          }
-          Scheduler.abort(null)
-          setWorkerStatus('')
-          showActivity('Tasks cleared')
-        } else if (action.action === 'remember' && action.memory) {
-          const memPath = '/system/memory/MEMORY.md'
-          let mem = VFS.isFile(memPath) ? VFS.readFile(memPath) : '# Agent Memory\n'
-          const section = action.section || 'Lessons Learned'
-          const sectionHeader = `## ${section}`
-          if (mem.includes(sectionHeader)) {
-            mem = mem.replace(sectionHeader, `${sectionHeader}\n- ${action.memory}`)
-          } else {
-            mem += `\n${sectionHeader}\n- ${action.memory}\n`
-          }
-          VFS.writeFile(memPath, mem)
-          showActivity('Memory updated')
-        }
-      }
+      // --- Intent-based dispatch (Talker outputs intent updates, not action blocks) ---
+      // (uses module-level _dispatchIntent and _legacyToIntent)
 
       // --- Streaming Dispatch: fire actions as soon as JSON is detected ---
       let _streamDispatched = false
@@ -398,24 +412,29 @@ const Agent = (() => {
 
       function _tryStreamDispatch(text) {
         if (_streamDispatched) return
-        // Look for a complete ```json {...} ``` block in the accumulated text
         const match = text.match(/```json\s*(\{[\s\S]*?\})\s*```/)
         if (!match) return
-        let action
+        let parsed
         try {
-          action = JSON.parse(match[1])
+          parsed = JSON.parse(match[1])
         } catch {
-          // Non-greedy failed — try greedy extraction
           const start = text.indexOf('{', text.indexOf('```json'))
           const end = text.lastIndexOf('```')
           if (start >= 0 && end > start) {
-            try { action = JSON.parse(text.slice(start, end).trim()) } catch { return }
+            try { parsed = JSON.parse(text.slice(start, end).trim()) } catch { return }
           } else return
         }
-        if (!action?.action) return
+        if (!parsed) return
         _streamDispatched = true
-        _streamAction = action
-        _dispatchAction(action, userMessage)
+        _streamAction = parsed
+
+        // New intent format: { intents: [...] }
+        if (parsed.intents) {
+          _dispatchIntent(parsed)
+        } else if (parsed.action) {
+          // Legacy action block — convert to intent
+          _dispatchIntent(_legacyToIntent(parsed, userMessage))
+        }
       }
 
       const result = await ai.think(userMessage, {
@@ -455,10 +474,14 @@ const Agent = (() => {
       } else {
         // Post-stream parse: fallback for non-streaming or missed detection
         const actions = parseAction(fullReply)
-        const action = actions?.[0]
-        if (action) {
-          _dispatchAction(action, userMessage)
-          renderBubbleContent(bubble, action.reply || cleanReply(fullReply))
+        const parsed = actions?.[0]
+        if (parsed) {
+          if (parsed.intents) {
+            _dispatchIntent(parsed)
+          } else if (parsed.action) {
+            _dispatchIntent(_legacyToIntent(parsed, userMessage))
+          }
+          renderBubbleContent(bubble, parsed.reply || cleanReply(fullReply))
         } else {
           renderBubbleContent(bubble, cleanReply(fullReply))
         }
@@ -562,59 +585,51 @@ Current OS state:
 - Installed apps: ${os.installedApps}
 - Installed skills: ${os.skills}
 `
-    // Inject Dispatcher state so Talker knows what Workers are doing
+    // Inject system state (Dispatcher + IntentState)
     const dispatchState = typeof Dispatcher !== 'undefined' ? Dispatcher.formatForTalker() : ''
     if (dispatchState) sys += dispatchState
+    const intentState = typeof IntentState !== 'undefined' ? IntentState.formatForTalker() : ''
+    if (intentState) sys += intentState
     sys += `\nCompleted recently: ${blackboard.completedSteps.map(s => s.text).join(', ') || 'none'}`
 
-    sys += `\n\nWhen the user wants you to DO something (not just talk), use action blocks.
+    sys += `\n\nWhen the user wants you to DO something (not just talk), output an intent block.
 
-## Scheduling Decision Guide
+Your job is to understand what the user wants and express it as intents. You do NOT decide how to schedule or execute — the Dispatcher handles that.
 
-Before emitting any action block, ALWAYS check the dispatch state above. Your job is to understand the user's INTENT in context:
+## Intent Actions
 
-**Is a Worker already running?**
-- User refines/changes the current task → STEER (don't create a new task!)
-- User asks something completely unrelated → new EXECUTE
-- User says "stop" / "cancel" / "算了" → ABORT
-
-**Multiple things to do?**
-- Steps that depend on each other ("find X, then do Y with it") → ONE task with ordered steps
-- Independent tasks ("play music AND open browser") → PARALLEL (multiple execute blocks)
-
-**Priority:**
-- 0 = urgent (interrupt current work)
-- 1 = normal
-- 2 = background (don't interrupt)
-
-## Action Blocks
-
-1. EXECUTE a new task:
+**CREATE** — user wants something new done:
 \`\`\`json
-{"action": "execute", "reply": "your reply", "task": "what to do", "steps": ["step 1", "step 2"], "priority": 1}
+{"reply": "your reply", "intents": [{"action": "create", "goal": "clear description of what to achieve"}]}
 \`\`\`
 
-2. STEER an existing Worker (change direction, add context, refine):
+**UPDATE** — user refines, adds to, or changes an existing intent:
 \`\`\`json
-{"action": "steer", "reply": "your reply", "instruction": "new direction or additional context"}
-\`\`\`
-Use steer when the user's message is a follow-up, correction, or refinement of what's already running. Do NOT create a new task for follow-ups.
-
-3. ABORT everything:
-\`\`\`json
-{"action": "abort", "reply": "your reply"}
+{"reply": "your reply", "intents": [{"action": "update", "id": "intent-1", "goal": "updated goal description", "context": "what changed"}]}
 \`\`\`
 
-4. REMEMBER something:
+**CANCEL** — user wants to stop something:
 \`\`\`json
-{"action": "remember", "reply": "your reply", "memory": "what to remember", "section": "About You|Preferences|Lessons Learned"}
+{"reply": "your reply", "intents": [{"action": "cancel", "id": "intent-1"}]}
 \`\`\`
 
-You also have SKILLS — reusable tools you've created. When executing tasks, you can use existing skills or create new ones.
+**DONE** — mark intent as completed (usually automatic, but you can do it):
+\`\`\`json
+{"reply": "your reply", "intents": [{"action": "done", "id": "intent-1"}]}
+\`\`\`
+
+## Key Rules
+
+1. Check Active Intents above. If the user's message relates to an existing intent, UPDATE it — don't create a duplicate.
+2. Write clear, complete goals. "播放一下" is bad. "播放刚才找到的周杰伦的歌" is good.
+3. Multiple independent goals = multiple create intents in one block.
+4. Sequential goals (B depends on A) = one intent with a combined goal.
+5. For conversation, questions, opinions — just reply normally. No intent blocks needed.
+
+You also have SKILLS — reusable tools you've created.
 Installed skills: ${os.skills}
-To create a skill during execution, use the create_skill tool. Skills auto-load on next session.
 
-For conversation, questions, opinions, brainstorming — just reply normally. No action blocks needed. Be natural, concise, and have personality.`
+Be natural, concise, and have personality.`
     return sys
   }
 
@@ -1157,9 +1172,10 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
             }
           }
         } else {
-          // Single or no execute intents — dispatch normally
+          // Single or no execute intents — dispatch via IntentState
           for (const intent of intents) {
-            _dispatchAction(intent.action, intent.msg)
+            const converted = _legacyToIntent(intent.action, intent.msg)
+            if (converted) _dispatchIntent(converted)
           }
         }
 

@@ -11,7 +11,7 @@ const Scheduler = (() => {
 
   // --- Task lifecycle ---
 
-  function enqueue(taskDescription, steps = [], priority = 1, dependsOn = []) {
+  function enqueue(taskDescription, steps = [], priority = 1, dependsOn = [], meta = {}) {
     // Dedup: skip if same task is already pending or running
     const norm = taskDescription.trim().toLowerCase()
     const isDup = pending.some(t => t.task.trim().toLowerCase() === norm && t.status === 'pending')
@@ -21,7 +21,7 @@ const Scheduler = (() => {
       return -1
     }
     const id = nextTaskId++
-    const entry = { id, task: taskDescription, steps, priority, dependsOn, status: 'pending' }
+    const entry = { id, task: taskDescription, steps, priority, dependsOn, status: 'pending', ...meta }
     pending.push(entry)
     pending.sort((a, b) => a.priority - b.priority)
     EventBus.emit('scheduler.enqueued', { id, task: taskDescription, priority })
