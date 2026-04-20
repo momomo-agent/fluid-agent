@@ -341,6 +341,12 @@ const WindowManager = (() => {
     // Try AppRegistry first (unified path)
     if (typeof AppRegistry !== 'undefined' && AppRegistry.has(w.type)) {
       const app = AppRegistry.get(w.type)
+      // New unified path: manifest has view field → AppRuntime
+      if (app.view && typeof AppRuntime !== 'undefined') {
+        const appPath = app._appPath || `/tmp/apps/${app.id}`
+        AppRuntime.render(body, app, appPath, w)
+        return
+      }
       if (app.sandboxed) {
         renderSandboxedApp(body, app, w)
       } else if (app.render) {

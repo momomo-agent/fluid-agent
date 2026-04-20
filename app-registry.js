@@ -24,6 +24,10 @@ const AppRegistry = (() => {
    * @param {string} [manifest.js] - for sandboxed=true apps
    * @param {string} [manifest.description]
    * @param {string} [manifest.category='system'|'user'|'ephemeral']
+   * @param {string} [manifest.view] - view entry: local filename or URL
+   * @param {string} [manifest.data] - data file name (reactive state JSON)
+   * @param {string} [manifest.actions] - actions file name (declarative action list)
+   * @param {string} [manifest._appPath] - VFS directory path (set by scanVFS)
    */
   function register(manifest) {
     if (!manifest.id) throw new Error('App manifest must have an id')
@@ -85,13 +89,15 @@ const AppRegistry = (() => {
     if (!dirs) return
     for (const entry of dirs) {
       if (entry.type !== 'dir') continue
-      const manifestPath = `${basePath}/${entry.name}/manifest.json`
+      const appDir = `${basePath}/${entry.name}`
+      const manifestPath = `${appDir}/manifest.json`
       if (VFS.isFile(manifestPath)) {
         try {
           const manifest = JSON.parse(VFS.readFile(manifestPath))
+          manifest._appPath = appDir // store resolved directory
           // Don't overwrite builtin apps that already have render functions
           const existing = _apps.get(manifest.id)
-          if (existing && existing.render) {
+          if (existing && existing.render && !manifest.view) {
             // Merge manifest fields but keep the render function
             _apps.set(manifest.id, { ...manifest, render: existing.render })
           } else {
@@ -124,8 +130,9 @@ const AppRegistry = (() => {
             const appId = parts[parts.length - 2]
             try {
               const manifest = JSON.parse(VFS.readFile(path))
+              manifest._appPath = appDir
               const existing = _apps.get(manifest.id || appId)
-              if (existing && existing.render) {
+              if (existing && existing.render && !manifest.view) {
                 _apps.set(manifest.id || appId, { ...manifest, render: existing.render })
               } else {
                 register({ id: appId, ...manifest })

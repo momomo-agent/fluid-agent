@@ -313,7 +313,7 @@
   // ── Apps & Skills ──
 
   Capabilities.register('app', {
-    description: 'Manage generative apps. Preferred: write files to /home/user/apps/<name>/ then call create with just name. Size guide: calculator~320x420, dashboard~700x500.',
+    description: 'Manage generative apps. Preferred: write manifest.json + view HTML + data.json + actions.json to /home/user/apps/<name>/ then call create. Also supports legacy html/css/js params. Size guide: calculator~320x420, dashboard~700x500.',
     icon: '💻',
     category: 'Apps',
     schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'uninstall', 'list'] }, name: { type: 'string' }, html: { type: 'string' }, css: { type: 'string' }, js: { type: 'string' }, icon: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, description: { type: 'string' } }, required: ['action'] },
@@ -321,8 +321,25 @@
       const { VFS, WindowManager, showActivity } = ctx
       switch (action) {
         case 'create': case 'update': {
-          let appHtml = html, appCss = css, appJs = js
           const appDir = `/home/user/apps/${name}`
+          // Check if this app uses the new unified format (has manifest with view field)
+          const existingManifest = VFS.isFile(`${appDir}/manifest.json`) ? (() => { try { return JSON.parse(VFS.readFile(`${appDir}/manifest.json`)) } catch { return null } })() : null
+          if (existingManifest && existingManifest.view) {
+            // New unified format — manifest+view+data+actions already written by agent via fs tool
+            // Just ensure manifest has required fields and open the app
+            if (!existingManifest.id) existingManifest.id = name
+            if (icon) existingManifest.icon = icon
+            if (width || height) existingManifest.size = { width: width || 600, height: height || 460 }
+            if (description) existingManifest.description = description
+            existingManifest._appPath = appDir
+            VFS.writeFile(`${appDir}/manifest.json`, JSON.stringify(existingManifest, null, 2))
+            AppRegistry.register(existingManifest)
+            WindowManager.openApp(existingManifest.id || name)
+            showActivity(`💻 ${action === 'create' ? 'Created' : 'Updated'} app: ${name}`)
+            return { success: true, message: `App "${name}" ${action === 'create' ? 'created and opened' : 'updated'}` }
+          }
+          // Legacy path: html/css/js params
+          let appHtml = html, appCss = css, appJs = js
           if (!appHtml) {
             if (VFS.isFile(`${appDir}/index.html`)) appHtml = VFS.readFile(`${appDir}/index.html`)
             if (VFS.isFile(`${appDir}/style.css`)) appCss = VFS.readFile(`${appDir}/style.css`)
@@ -373,29 +390,129 @@
   })
 
   Capabilities.register('dynamicapp', {
-    description: 'Create and manage dynamic workbench windows. The agent writes state files and the window auto-updates. Use open to create/reopen, update to change data/view, list to see all, close to dismiss, destroy to delete. You can provide custom HTML via the html parameter for rich custom views.',
+    description: 'Create and manage dynamic app windows. Writes standard manifest+data+actions+view to /tmp/apps/. Use open to create/reopen, update to change data/view, list to see all, close to dismiss, destroy to delete. Provide custom HTML via the html parameter for rich views. Data available as window.__app.data, dispatch actions via window.__app.dispatch(id, params).',
     icon: '⚡',
     category: 'Apps',
     alwaysAvailable: true,
-    schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'update', 'close', 'destroy', 'list'] }, id: { type: 'string', description: 'App id (used as directory name)' }, title: { type: 'string' }, icon: { type: 'string' }, object: { type: 'object', description: 'Data object (injected as window.__object in custom HTML views)' }, actions: { type: 'array', description: 'Action buttons [{id, label, icon?, style?}]', items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, style: { type: 'string' } }, required: ['id', 'label'] } }, view: { type: 'object', description: 'View config {template: "table"|"list"|"markdown"} for built-in templates' }, html: { type: 'string', description: 'Custom HTML for rich views. Data available as window.__object. Call triggerAction(id, params) for actions.' } }, required: ['action'] },
+    schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'update', 'close', 'destroy', 'list'] }, id: { type: 'string', description: 'App id (used as directory name)' }, title: { type: 'string' }, icon: { type: 'string' }, object: { type: 'object', description: 'Data object (injected as window.__app.data)' }, actions: { type: 'array', description: 'Action buttons [{id, label, icon?, handler?, mutate?, params?}]', items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, handler: { type: 'string' }, style: { type: 'string' } }, required: ['id', 'label'] } }, view: { type: 'object', description: 'View config {template: "table"|"list"|"markdown"} for built-in templates' }, html: { type: 'string', description: 'Custom HTML view. Data: window.__app.data. Actions: window.__app.dispatch(id, params). Updates: window.__app.onDataUpdate(cb).' } }, required: ['action'] },
     handler: ({ action, id, title, icon, object, actions, view, html }, ctx) => {
+      const { VFS, WindowManager, showActivity } = ctx
       switch (action) {
         case 'open': {
           if (!id) return { error: 'id is required' }
-          // If already exists, reopen; otherwise create
-          const p = DynamicApp.paths(id)
-          if (VFS.isFile(p.meta)) return DynamicApp.open(id)
-          const result = DynamicApp.create(id, { title, icon, object, actions, view })
-          if (html) DynamicApp.update(id, { html })
-          return result
+          const appDir = `/tmp/apps/${id}`
+          const manifestPath = `${appDir}/manifest.json`
+          // If already exists in new format, just reopen
+          if (VFS.isFile(manifestPath)) {
+            // Update data if provided
+            if (object !== undefined) {
+              const m = (() => { try { return JSON.parse(VFS.readFile(manifestPath)) } catch { return {} } })()
+              const dataFile = m.data || 'data.json'
+              VFS.writeFile(`${appDir}/${dataFile}`, JSON.stringify(object, null, 2))
+            }
+            if (html !== undefined) {
+              const m = (() => { try { return JSON.parse(VFS.readFile(manifestPath)) } catch { return {} } })()
+              const viewFile = m.view || 'view.html'
+              VFS.writeFile(`${appDir}/${viewFile}`, html)
+            }
+            const m = (() => { try { return JSON.parse(VFS.readFile(manifestPath)) } catch { return { id } } })()
+            m._appPath = appDir
+            if (!AppRegistry.has(m.id || id)) AppRegistry.register({ ...m, _appPath: appDir, ephemeral: true })
+            const winId = WindowManager.openApp(m.id || id)
+            return { id, winId }
+          }
+          // Create new app in standard format
+          VFS.mkdir(appDir)
+          const viewFile = html ? 'view.html' : null
+          const manifest = {
+            id, name: title || id, icon: icon || '⚡',
+            size: 'medium', sandboxed: true, ephemeral: true,
+            data: 'data.json', actions: 'actions.json',
+            _appPath: appDir,
+          }
+          if (viewFile) manifest.view = viewFile
+          // For built-in template views without custom HTML, fall back to old DynamicApp
+          if (!html && typeof DynamicApp !== 'undefined') {
+            const result = DynamicApp.create(id, { title, icon, object, actions, view })
+            if (html) DynamicApp.update(id, { html })
+            return result
+          }
+          VFS.writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+          VFS.writeFile(`${appDir}/data.json`, JSON.stringify(object || {}, null, 2))
+          VFS.writeFile(`${appDir}/actions.json`, JSON.stringify(actions || [], null, 2))
+          if (html) VFS.writeFile(`${appDir}/view.html`, html)
+          AppRegistry.register(manifest)
+          const winId = WindowManager.openApp(id)
+          showActivity(`⚡ Created: ${title || id}`)
+          return { id, winId }
         }
         case 'update': {
           if (!id) return { error: 'id is required' }
-          return DynamicApp.update(id, { object, actions, view, html })
+          const appDir = `/tmp/apps/${id}`
+          const manifestPath = `${appDir}/manifest.json`
+          // Try new format first
+          if (VFS.isFile(manifestPath)) {
+            const m = (() => { try { return JSON.parse(VFS.readFile(manifestPath)) } catch { return { id } } })()
+            if (object !== undefined) VFS.writeFile(`${appDir}/${m.data || 'data.json'}`, JSON.stringify(object, null, 2))
+            if (actions !== undefined) VFS.writeFile(`${appDir}/${m.actions || 'actions.json'}`, JSON.stringify(actions, null, 2))
+            if (html !== undefined) {
+              if (!m.view) { m.view = 'view.html'; VFS.writeFile(manifestPath, JSON.stringify(m, null, 2)) }
+              VFS.writeFile(`${appDir}/${m.view}`, html)
+            }
+            return { success: true, id }
+          }
+          // Fall back to old DynamicApp
+          if (typeof DynamicApp !== 'undefined') return DynamicApp.update(id, { object, actions, view, html })
+          return { error: `App "${id}" not found` }
         }
-        case 'close': return id ? DynamicApp.close(id) : { error: 'id is required' }
-        case 'destroy': return id ? DynamicApp.destroy(id) : { error: 'id is required' }
-        case 'list': return { apps: DynamicApp.list() }
+        case 'close': {
+          if (!id) return { error: 'id is required' }
+          // Try new format
+          const appDir = `/tmp/apps/${id}`
+          if (VFS.isFile(`${appDir}/manifest.json`)) {
+            AppRegistry.unregister(id)
+            if (typeof AppRuntime !== 'undefined') AppRuntime._cleanup(id)
+            return { success: true }
+          }
+          // Fall back to old DynamicApp
+          if (typeof DynamicApp !== 'undefined') return DynamicApp.close(id)
+          return { error: `App "${id}" not found` }
+        }
+        case 'destroy': {
+          if (!id) return { error: 'id is required' }
+          const appDir = `/tmp/apps/${id}`
+          if (VFS.isFile(`${appDir}/manifest.json`)) {
+            AppRegistry.unregister(id)
+            if (typeof AppRuntime !== 'undefined') AppRuntime._cleanup(id)
+            // Delete all files in the app directory
+            const files = VFS.ls(appDir)
+            if (files) files.forEach(f => VFS.rm(`${appDir}/${f.name}`))
+            VFS.rm(appDir)
+            return { success: true }
+          }
+          if (typeof DynamicApp !== 'undefined') return DynamicApp.destroy(id)
+          return { error: `App "${id}" not found` }
+        }
+        case 'list': {
+          const apps = []
+          // New format apps in /tmp/apps/
+          const tmpDirs = VFS.ls('/tmp/apps')
+          if (tmpDirs) {
+            for (const d of tmpDirs) {
+              if (d.type !== 'dir') continue
+              const mp = `/tmp/apps/${d.name}/manifest.json`
+              if (VFS.isFile(mp)) {
+                try { apps.push(JSON.parse(VFS.readFile(mp))) } catch {}
+              }
+            }
+          }
+          // Old format DynamicApps
+          if (typeof DynamicApp !== 'undefined') {
+            const old = DynamicApp.list()
+            apps.push(...old)
+          }
+          return { apps }
+        }
         default: return { error: `Unknown dynamicapp action: ${action}` }
       }
     }
