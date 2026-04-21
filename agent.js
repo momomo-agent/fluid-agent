@@ -1258,14 +1258,36 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
     _chatProcessing = true
 
     while (_chatQueue.length > 0) {
-      // Wait briefly for more messages to arrive (batch window)
+      const item = _chatQueue[0]
+
+      // Worker result report — always process immediately, no batching
+      if (item.type === 'report') {
+        _chatQueue.shift()
+        try {
+          await _doReportViaTalker()
+          item.resolve()
+        } catch (e) {
+          console.error('[ChatQueue] reportViaTalker error:', e.message)
+          item.resolve() // don't reject — report failures shouldn't crash the queue
+        }
+        continue
+      }
+
+      // User messages — batch window
       if (_chatQueue.length === 1) {
         await new Promise(r => setTimeout(r, BATCH_WAIT_MS))
       }
 
+      // Collect only user messages for this batch (stop at first non-user)
+      const userItems = []
+      while (_chatQueue.length > 0 && _chatQueue[0].type === 'user') {
+        userItems.push(_chatQueue.shift())
+      }
+      if (userItems.length === 0) continue
+
       // Single message — process normally
-      if (_chatQueue.length === 1) {
-        const { msg, resolve, reject } = _chatQueue.shift()
+      if (userItems.length === 1) {
+        const { msg, resolve, reject } = userItems[0]
         try {
           const result = await origChat(msg)
           resolve(result)
@@ -1276,7 +1298,7 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
       }
 
       // Multiple messages — batch mode
-      const batch = _chatQueue.splice(0, _chatQueue.length)
+      const batch = userItems
       console.log(`[BatchChat] Processing ${batch.length} messages in batch`)
 
       try {
@@ -1346,7 +1368,7 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
   async function chatWithTracking(msg) {
     lastUserMessage = Date.now()
     return new Promise((resolve, reject) => {
-      _chatQueue.push({ msg, resolve, reject })
+      _chatQueue.push({ type: 'user', msg, resolve, reject })
       _processChatQueue()
     })
   }
@@ -1408,6 +1430,14 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
 
   // Dispatcher notifies Talker: all workers settled, report results via Talker's full context
   async function reportViaTalker() {
+    // Enqueue into the shared chat queue so it serializes with user messages
+    return new Promise((resolve) => {
+      _chatQueue.push({ type: 'report', resolve, reject: resolve })
+      _processChatQueue()
+    })
+  }
+
+  async function _doReportViaTalker() {
     if (!ai) return
 
     // IntentState.formatForTalker() already includes completed results
