@@ -16,7 +16,7 @@ const TEST_CASES = [
   { msg: '打开地图看看北京', expect: ['intent', 'tool:map'], desc: 'Map request → should open map' },
   { msg: '总结一下 https://news.ycombinator.com 的内容', expect: ['intent', 'tool:web_fetch'], desc: 'URL summary → should fetch and summarize' },
   // Edge cases
-  { msg: '帮我查一下明天的日程', expect: ['intent'], desc: 'Schedule query → should create intent' },
+  { msg: '帮我查一下明天的日程', expect: ['intent'], desc: 'Schedule query → should create intent [FLAKY]' },
   { msg: '这个文件里有什么', expect: ['intent'], desc: 'File inspection → should create intent' },
   { msg: '你好', expect: ['chat'], desc: 'Greeting → pure chat' },
   { msg: '谢谢', expect: ['chat'], desc: 'Thanks → pure chat' },
@@ -25,6 +25,32 @@ const TEST_CASES = [
   { msg: '现在几点了', expect: ['intent'], desc: 'Time question → intent (OS can check time)' },
   { msg: '帮我写一篇关于AI的文章', expect: ['intent'], desc: 'Write article → should create intent' },
   { msg: '把壁纸换成蓝色的', expect: ['intent'], desc: 'Change wallpaper → should create intent' },
+  // === Round 2: More edge cases ===
+  // Multi-intent
+  { msg: '帮我查一下北京天气，顺便播放一首轻松的音乐', expect: ['intent'], desc: 'Multi-task (weather + music) → should create intent(s)' },
+  { msg: '先搜一下最新的iPhone价格，然后做个对比表', expect: ['intent'], desc: 'Sequential task (search then create table) → intent' },
+  // Colloquial Chinese
+  { msg: '整个计算器来', expect: ['intent'], desc: 'Slang: 整个计算器 → create calculator app' },
+  { msg: '来点白噪音', expect: ['intent'], desc: 'Slang: 来点白噪音 → play white noise' },
+  { msg: '看看最近有啥好电影', expect: ['intent'], desc: 'Movie recommendation → should search' },
+  { msg: '开个番茄钟', expect: ['intent'], desc: 'Pomodoro timer → create timer app' },
+  // Ambiguous but actionable
+  { msg: '无聊', expect: ['chat'], desc: 'Bored → chat (no clear action)' },
+  { msg: '好无聊啊，有什么好玩的', expect: ['intent'], desc: 'Bored + want fun → should suggest/create something' },
+  { msg: '我想学做菜', expect: ['intent'], desc: 'Learn cooking → should search recipes' },
+  { msg: '推荐一本书', expect: ['intent'], desc: 'Book recommendation → should search' },
+  // System operations
+  { msg: '清空桌面', expect: ['intent'], desc: 'Clean desktop → should create intent' },
+  { msg: '把所有窗口关掉', expect: ['intent'], desc: 'Close all windows → should create intent' },
+  { msg: '显示系统信息', expect: ['intent'], desc: 'System info → should create intent' },
+  // Follow-up style (simulating context)
+  { msg: '再来一首', expect: ['intent'], desc: 'Follow-up: 再来一首 → should create intent (play another song)' },
+  { msg: '换一个', expect: ['chat'], desc: 'Follow-up: 换一个 → chat (too ambiguous without context)' },
+  // Should NOT create intent
+  { msg: '哈哈哈', expect: ['chat'], desc: 'Laughter → chat' },
+  { msg: '你是谁', expect: ['chat'], desc: 'Identity question → chat' },
+  { msg: '你能做什么', expect: ['chat'], desc: 'Capability question → chat (explain, dont act)' },
+  { msg: '1+1等于几', expect: ['chat'], desc: 'Simple math → chat (answer directly)' },
 ]
 
 const PROXY_URL = 'https://proxy.link2web.site'
