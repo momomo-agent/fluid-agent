@@ -980,7 +980,7 @@ NetEase results have full MP3 playUrl. iTunes results have 30s previewUrl.
 
 IMPORTANT: If no planned steps are listed above, call plan_steps FIRST to set your execution plan.
 Do NOT call update_progress separately — progress is tracked automatically. Focus on executing tools efficiently: batch multiple tool calls in a single turn when possible.
-When you create documents or gather information, ALWAYS show the result to the user — use dynamicapp with template:"markdown" to display content, or open the file with the editor app. Never just write a file silently.
+Think about what the user actually wants as the end result, and deliver that. If they want to see information, show it visually. If they want music, play it. If they want directions, show a map. Match the output to the intent.
 When finished, call the done tool with a summary. Set summary to "silent" if the action itself IS the result (e.g. playing music, changing wallpaper, opening an app). Only write a detailed summary when there are findings or information the user needs to read.`
 
     let workerMessages = opts.resumeMessages || [{ role: 'user', content: taskDescription }]
