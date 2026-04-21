@@ -966,7 +966,8 @@ System APIs via window.fluidOS:
 To play music: search_music({query}) → get results with URLs → music({action: "add_and_play", title, artist, url: playUrl or previewUrl, artwork}).
 NetEase results have full MP3 playUrl. iTunes results have 30s previewUrl.
 
-IMPORTANT: If no planned steps are listed above, call plan_steps FIRST to set your execution plan. After completing each step, call update_progress with the step_index.
+IMPORTANT: If no planned steps are listed above, call plan_steps FIRST to set your execution plan.
+Do NOT call update_progress separately — progress is tracked automatically. Focus on executing tools efficiently: batch multiple tool calls in a single turn when possible.
 When finished, call the done tool with a summary. Set summary to "silent" if the action itself IS the result (e.g. playing music, changing wallpaper, opening an app). Only write a detailed summary when there are findings or information the user needs to read.`
 
     let workerMessages = [{ role: 'user', content: taskDescription }]
@@ -1051,6 +1052,12 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
           }
 
           console.log(`[Worker #${workerId}] Turn ${turnCount}: tools exec ${Date.now()-_toolsT0}ms`)
+          // Auto-advance progress: mark next pending step as done after each turn with tool calls
+          const nextPending = steps.findIndex(s => s.status !== 'done')
+          if (nextPending >= 0 && turn.toolCalls.some(tc => tc.name !== 'plan_steps' && tc.name !== 'search_tools')) {
+            steps[nextPending].status = 'done'
+            WindowManager.updateTask(task)
+          }
           const toolMsgs = ai.buildToolResults(turn.toolCalls, results)
           workerMessages.push(...toolMsgs)
         }
