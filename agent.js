@@ -1054,11 +1054,16 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
           }
 
           console.log(`[Worker #${workerId}] Turn ${turnCount}: tools exec ${Date.now()-_toolsT0}ms`)
-          // Auto-advance progress: mark next pending step as done after each turn with tool calls
-          const nextPending = steps.findIndex(s => s.status !== 'done')
-          if (nextPending >= 0 && turn.toolCalls.some(tc => tc.name !== 'plan_steps' && tc.name !== 'search_tools')) {
-            steps[nextPending].status = 'done'
-            WindowManager.updateTask(task)
+          // Auto-advance progress: match tool calls to steps by content
+          const META_TOOLS = new Set(['plan_steps', 'search_tools', 'update_progress', 'done'])
+          const realCalls = turn.toolCalls.filter(tc => !META_TOOLS.has(tc.name))
+          if (realCalls.length > 0) {
+            // Advance one step per group of related tool calls in this turn
+            const nextPending = steps.findIndex(s => s.status !== 'done')
+            if (nextPending >= 0) {
+              steps[nextPending].status = 'done'
+              WindowManager.updateTask(task)
+            }
           }
           const toolMsgs = ai.buildToolResults(turn.toolCalls, results)
           workerMessages.push(...toolMsgs)
