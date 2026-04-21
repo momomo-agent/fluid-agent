@@ -1705,8 +1705,8 @@ ${css}
   function renderBrowser(w, body) {
     const url = w.data?.url || ''
     const displayUrl = w.data?.displayUrl || url || 'about:blank'
-    // Proxy external URLs to strip X-Frame-Options/CSP headers
-    const proxyUrl = url ? `https://proxy.link2web.site/frame?url=${encodeURIComponent(url)}` : ''
+    const fetchedContent = w.data?.fetchedContent || ''
+    const isLoading = w.data?.isLoading || false
 
     body.innerHTML = `<div class="browser-window">
       <div class="browser-toolbar">
@@ -1717,8 +1717,12 @@ ${css}
           <input class="browser-url-input" value="${displayUrl}" />
         </div>
       </div>
-      <div class="browser-content">${proxyUrl
-        ? `<iframe src="${proxyUrl}" style="width:100%;height:100%;border:none" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>`
+      <div class="browser-content">${url
+        ? (isLoading
+          ? '<div style="padding:40px;text-align:center;color:var(--text-muted)">Loading...</div>'
+          : (fetchedContent
+            ? `<div class="browser-fetched" style="padding:16px;overflow:auto;height:100%;font-size:13px;line-height:1.6;color:var(--text-primary)">${fetchedContent}</div>`
+            : '<div style="padding:40px;text-align:center;color:var(--text-muted)">Failed to load</div>'))
         : `<div class="browser-home">
             <div class="browser-home-logo">🌐</div>
             <div class="browser-home-title">FluidOS Browser</div>
@@ -1733,19 +1737,38 @@ ${css}
     </div>`
 
     const urlInput = body.querySelector('.browser-url-input')
-    const navigate = (newUrl) => {
+    const navigate = async (newUrl) => {
       let u = newUrl.trim()
       if (u && !u.match(/^https?:\/\//)) u = 'https://' + u
-      w.data = { ...w.data, url: u, displayUrl: u }
+      w.data = { ...w.data, url: u, displayUrl: u, fetchedContent: '', isLoading: true }
       w.el.querySelector('.window-title').textContent = u ? new URL(u).hostname : 'Browser'
       renderBrowser(w, body)
+      // Fetch content via proxy
+      try {
+        const res = await fetch(`https://proxy.link2web.site?url=${encodeURIComponent(u)}&mode=llm`, { headers: { 'Accept': 'text/plain' } })
+        const text = await res.text()
+        // Convert markdown-ish content to simple HTML
+        const html = text
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+          .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+          .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#60a5fa">$1</a>')
+          .replace(/\n/g, '<br>')
+        w.data = { ...w.data, fetchedContent: html, isLoading: false }
+        renderBrowser(w, body)
+      } catch (e) {
+        w.data = { ...w.data, fetchedContent: `<div style="color:#f87171">Error: ${e.message}</div>`, isLoading: false }
+        renderBrowser(w, body)
+      }
     }
     urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') navigate(urlInput.value) })
     body.querySelector('#browser-reload')?.addEventListener('click', () => {
-      if (w.data?.url) renderBrowser(w, body)
+      if (w.data?.url) navigate(w.data.url)
     })
     body.querySelector('#browser-back')?.addEventListener('click', () => {
-      w.data = { ...w.data, url: '' }; renderBrowser(w, body)
+      w.data = { ...w.data, url: '', fetchedContent: '', isLoading: false }; renderBrowser(w, body)
     })
     body.querySelectorAll('.browser-bookmark').forEach(el => {
       el.addEventListener('click', () => navigate(el.dataset.url))

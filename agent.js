@@ -920,7 +920,7 @@ More tools available — call search_tools({names: [...]}) to activate:
 ${extendedToolList}
 
 PREFER native apps over browser. Use music for music, map for locations, video for videos.
-IMPORTANT: The browser app uses an iframe and CANNOT load external websites (CORS/cross-origin blocks). For web searches, use web_search/web_fetch tools instead. The browser app is only useful for displaying local content.
+The browser app fetches and renders web content (not an iframe). For data extraction and search, use web_search/web_fetch tools directly — they return structured data you can process.
 To play music: search_tools({names:["search_music","music"]}) → search_music({query}) → music({action:"add_and_play",...}).
 Once loaded, tools stay available for the rest of this task.
 

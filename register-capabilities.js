@@ -215,7 +215,7 @@
   // ── Web & Browser ──
 
   Capabilities.register('browser', {
-    description: 'Browser control: open, navigate to URL, go back',
+    description: 'Browser: open URL and display fetched content. For searching, prefer web_search instead.',
     icon: '🌐',
     category: 'Web',
     schema: { type: 'object', properties: { action: { type: 'string', enum: ['open', 'navigate', 'back'] }, url: { type: 'string' } }, required: ['action'] },
@@ -226,7 +226,7 @@
         case 'back': ctx.EventBus.emit('browser.control', { action: 'back' }); break
         default: return { error: `Unknown browser action: ${action}` }
       }
-      return { success: true, warning: 'Browser iframe cannot load external websites due to CORS. Use web_search/web_fetch tools for actual web content retrieval.' }
+      return { success: true, hint: 'Browser displays fetched content. For data extraction, use web_search or web_fetch tools directly.' }
     }
   })
 
