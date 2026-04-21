@@ -50,6 +50,7 @@ const Dispatcher = (() => {
       updatedAt: Date.now(),
       totalTokens: w.totalTokens || 0,
       toolCallCount: w.toolCallCount || 0,
+      error: w.error || null,
     }, null, 2))
   }
 
