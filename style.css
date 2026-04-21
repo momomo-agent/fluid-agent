@@ -413,6 +413,18 @@ del { text-decoration: line-through; color: rgba(0,0,0,0.4); }
   font-size: 12px; padding: 4px 8px;
 }
 
+/* Markdown table in chat bubbles */
+.md-table {
+  width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 13px;
+}
+.md-table th, .md-table td {
+  padding: 6px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.md-table th {
+  font-weight: 600; color: var(--text-primary); border-bottom: 2px solid rgba(255,255,255,0.2);
+}
+.md-table tr:hover td { background: rgba(255,255,255,0.03); }
+
 /* Chat inline media */
 .chat-media {
   margin: 6px 0; border-radius: 10px; overflow: hidden; cursor: grab;

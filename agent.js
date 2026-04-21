@@ -188,6 +188,67 @@ const Agent = (() => {
 
   function setWorkerStatus(text) { const el = document.getElementById('worker-status'); if (el) el.textContent = text }
 
+  // ── Lightweight markdown renderer for chat bubbles ──
+
+  function _hasMarkdown(text) {
+    return /\|.*\|.*\|/.test(text) || /\*\*/.test(text) || /^\s*[-*]\s/m.test(text) || /^#{1,3}\s/m.test(text) || /`[^`]+`/.test(text)
+  }
+
+  function _renderMarkdown(text) {
+    // Escape HTML first
+    let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+    // Tables: detect lines with | separators
+    const lines = html.split('\n')
+    const out = []
+    let i = 0
+    while (i < lines.length) {
+      // Table detection: current line has |, next line is separator (|---|---|
+      if (lines[i].includes('|') && i + 1 < lines.length && /^[\s|:-]+$/.test(lines[i + 1])) {
+        const headers = lines[i].split('|').map(c => c.trim()).filter(Boolean)
+        i += 2 // skip header + separator
+        const rows = []
+        while (i < lines.length && lines[i].includes('|')) {
+          rows.push(lines[i].split('|').map(c => c.trim()).filter(Boolean))
+          i++
+        }
+        let table = '<table class="md-table"><thead><tr>'
+        headers.forEach(h => table += `<th>${_inlineMarkdown(h)}</th>`)
+        table += '</tr></thead><tbody>'
+        rows.forEach(r => {
+          table += '<tr>'
+          r.forEach(c => table += `<td>${_inlineMarkdown(c)}</td>`)
+          table += '</tr>'
+        })
+        table += '</tbody></table>'
+        out.push(table)
+      } else {
+        out.push(_blockMarkdown(lines[i]))
+        i++
+      }
+    }
+    return out.join('\n')
+  }
+
+  function _blockMarkdown(line) {
+    // Headers
+    if (/^###\s/.test(line)) return `<strong>${_inlineMarkdown(line.slice(4))}</strong>`
+    if (/^##\s/.test(line)) return `<strong>${_inlineMarkdown(line.slice(3))}</strong>`
+    if (/^#\s/.test(line)) return `<strong style="font-size:1.1em">${_inlineMarkdown(line.slice(2))}</strong>`
+    // List items
+    if (/^\s*[-*]\s/.test(line)) return `<div style="padding-left:12px">• ${_inlineMarkdown(line.replace(/^\s*[-*]\s/, ''))}</div>`
+    if (/^\s*\d+\.\s/.test(line)) return `<div style="padding-left:12px">${_inlineMarkdown(line)}</div>`
+    return _inlineMarkdown(line)
+  }
+
+  function _inlineMarkdown(text) {
+    return text
+      .replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px;font-size:0.9em">$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#7eb8ff" target="_blank">$1</a>')
+  }
+
   function renderBubbleContent(bubble, text) {
     // Detect media patterns and render inline
     const imgExts = /\.(jpg|jpeg|png|gif|webp|svg|bmp|avif)(\?[^\s]*)?$/i
@@ -227,7 +288,15 @@ const Agent = (() => {
     }
 
     const allMedia = [...mdMatches, ...urlMatches].sort((a, b) => a.start - b.start)
-    if (allMedia.length === 0) { bubble.textContent = text; return }
+    if (allMedia.length === 0) {
+      // Render markdown if text contains markdown patterns
+      if (_hasMarkdown(text)) {
+        bubble.innerHTML = _renderMarkdown(text)
+      } else {
+        bubble.textContent = text
+      }
+      return
+    }
 
     allMedia.forEach(m => {
       // Add text before this media
