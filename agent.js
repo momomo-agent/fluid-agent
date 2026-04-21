@@ -70,7 +70,10 @@ const Agent = (() => {
       if (m.role === 'user' || m.role === 'assistant') {
         // Skip empty assistant messages (failed requests saved as loading state)
         if (m.role === 'assistant' && !m.content?.trim()) return
-        const text = m.role === 'assistant' ? (cleanReply(m.content || '') || '✅') : (m.content?.slice(0, 500) || '')
+        const cleaned = m.role === 'assistant' ? cleanReply(m.content || '') : null
+        // Skip assistant messages that are pure JSON (no user-visible text)
+        if (m.role === 'assistant' && !cleaned) return
+        const text = m.role === 'assistant' ? cleaned : (m.content?.slice(0, 500) || '')
         addBubble(m.role === 'assistant' ? 'agent' : 'user', text)
       }
     })
