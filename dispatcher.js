@@ -40,7 +40,8 @@ const Dispatcher = (() => {
 
     switch (action) {
       case 'create': {
-        // New intent → spawn a Worker
+        // New intent → mark running + spawn a Worker
+        IntentState.running(intent.id)
         const workerId = _nextWorkerId++
         _intentWorker.set(intent.id, workerId)
         _workerIntent.set(workerId, intent.id)
@@ -275,6 +276,54 @@ const Dispatcher = (() => {
     if (_decisionLog.length > MAX_LOG) _decisionLog.shift()
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // Worker → Dispatcher → IntentState (the completion flow)
+  // ═══════════════════════════════════════════════════════════════
+
+  let _onResultsReady = null  // callback: Dispatcher tells Talker "results are ready"
+
+  function onResultsReady(fn) { _onResultsReady = fn }
+
+  function workerCompleted(workerId, result) {
+    const intentId = _workerIntent.get(workerId)
+    if (!intentId) {
+      console.warn(`[Dispatcher] workerCompleted: no intent for worker #${workerId}`)
+      return
+    }
+    const summary = result?.summary || ''
+    const log = result?.log || []
+    console.log(`[Dispatcher] Worker #${workerId} completed → intent ${intentId}: ${summary.slice(0, 80)}`)
+
+    // "silent" means the action itself is the result (e.g. playing music) — mark reported immediately
+    const silent = summary === 'silent'
+    IntentState.done(intentId, { summary, log: log.slice(-10) })
+    if (silent) IntentState.markReported(intentId)
+
+    // Check if all active intents are settled
+    const stillActive = IntentState.active().length > 0
+    if (!stillActive && _onResultsReady) {
+      // Only notify Talker if there are unreported results
+      const unreported = IntentState.all().filter(i => (i.status === 'done' || i.status === 'failed') && !i._reported)
+      if (unreported.length > 0) {
+        console.log('[Dispatcher] All intents settled, notifying Talker')
+        _onResultsReady()
+      }
+    }
+  }
+
+  function workerFailed(workerId, error) {
+    const intentId = _workerIntent.get(workerId)
+    if (!intentId) return
+    console.log(`[Dispatcher] Worker #${workerId} failed → intent ${intentId}: ${error}`)
+    IntentState.fail(intentId, error)
+
+    const stillActive = IntentState.active().length > 0
+    if (!stillActive && _onResultsReady) {
+      console.log('[Dispatcher] All intents settled (with failures), notifying Talker')
+      _onResultsReady()
+    }
+  }
+
   // Legacy compat: handleIntent for any code still calling it
   function handleIntent(intent, priority) {
     console.warn('[Dispatcher] handleIntent is deprecated, use IntentState.create/update instead')
@@ -288,6 +337,7 @@ const Dispatcher = (() => {
     handleIntent,
     beforeTurn, afterTurn,
     checkForResume, resumeWorker,
+    workerCompleted, workerFailed, onResultsReady,
     getStateSummary, getState, formatForTalker,
     get decisionLog() { return _decisionLog },
   }

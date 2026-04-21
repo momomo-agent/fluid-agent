@@ -172,6 +172,13 @@ const Agent = (() => {
     if (typeof Dispatcher !== 'undefined') Dispatcher.init(ai, storeInstance || null)
     if (typeof IntentState !== 'undefined') IntentState.init()
 
+    // Wire Dispatcher → Talker: when all workers complete, Talker reports results
+    if (typeof Dispatcher !== 'undefined') {
+      Dispatcher.onResultsReady(() => {
+        reportViaTalker()
+      })
+    }
+
     // Wire VFS events → ContextAssembler (dynamic attention)
     if (typeof ContextAssembler !== 'undefined') {
       VFS.on((event, path) => {
@@ -882,7 +889,7 @@ Be natural, concise, and have personality.`
           setWorkerStatus(Scheduler.isIdle() ? '✅ Done' : `⏳ ${Scheduler.getState().pending.length} queued`)
           steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
           WindowManager.updateTask(task)
-          reportTaskResult(taskDescription, result.summary || '', task.log)
+          Dispatcher.workerCompleted(workerId, { summary: result.summary || '', log: task.log })
         }
         return result
       }
@@ -1062,7 +1069,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
               setWorkerStatus(Scheduler.isIdle() ? '✅ Done' : `⏳ ${Scheduler.getState().pending.length} queued`)
               steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
               WindowManager.updateTask(task)
-              reportTaskResult(taskDescription, result.summary || '', task.log)
+              Dispatcher.workerCompleted(workerId, { summary: result.summary || '', log: task.log })
               workerDone = true
             }
           }
@@ -1117,7 +1124,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         setWorkerStatus('✅ Done')
         steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
         WindowManager.updateTask(task)
-        reportTaskResult(taskDescription, '', task.log)
+        Dispatcher.workerCompleted(workerId, { summary: '', log: task.log })
         setTimeout(() => setWorkerStatus(''), 3000)
       }
     } catch (err) {
@@ -1128,6 +1135,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         showActivity('Task interrupted')
         steps.forEach(s => { if (s.status === 'pending' || s.status === 'running') s.status = 'aborted' })
         WindowManager.updateTask(task)
+        Dispatcher.workerFailed(workerId, 'aborted')
         setTimeout(() => setWorkerStatus(''), 2000)
       } else {
         task.status = 'error'
@@ -1139,6 +1147,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         addBubble('system', `Worker error: ${err.message}`)
         steps.forEach(s => { if (s.status !== 'done') s.status = 'error' })
         WindowManager.updateTask(task)
+        Dispatcher.workerFailed(workerId, err.message)
       }
     } finally {
       Dispatcher.updateWorker(workerId, { status: task.status })
@@ -1397,62 +1406,71 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
     return { reply: fullReply, action: parsedAction }
   }
 
-  // Worker completion notification
-  async function reportTaskResult(taskDesc, summary, log) {
+  // Dispatcher notifies Talker: all workers settled, report results via Talker's full context
+  async function reportViaTalker() {
     if (!ai) return
-    // Skip reporting for self-evident actions (music, wallpaper, etc.)
-    if (summary === 'silent') return
-    // Build a concise work report from the log
-    const logSummary = (log || []).slice(-10).join('\n')
+
+    // IntentState.formatForTalker() already includes completed results
+    // We trigger a Talker turn with a system nudge
+    const intentContext = IntentState.formatForTalker() + Dispatcher.formatForTalker()
+    if (!intentContext.trim()) return
+
+    // Collect settled intent IDs to mark as reported after
+    const settledIds = IntentState.all()
+      .filter(i => (i.status === 'done' || i.status === 'failed') && !i._reported)
+      .map(i => i.id)
+    if (settledIds.length === 0) return
 
     try {
       const bubble = createStreamBubble()
       let fullReply = ''
 
-      await ai.think(
-        `[TASK COMPLETED] Task: "${taskDesc}"\nWorker summary: ${summary || '(none)'}\nWork log:\n${logSummary}\n\nReport the results back to the user naturally, as if you just finished doing something for them. Be concise and informative.`,
-        {
-          system: `You are Fluid Agent. You just finished a background task. Report the results back to the user in the conversation. Be natural — like a friend saying "hey, done with that thing you asked for, here's what I found/did". Keep it concise. Include the key results/findings.`,
-          stream: true,
-          emit: (type, data) => {
-            if (type === 'token') {
-              const token = typeof data === 'string' ? data : (data?.text || '')
-              if (token) {
-                fullReply += token
-                bubble.textContent = cleanReply(fullReply)
-                bubble.parentElement.scrollTop = bubble.parentElement.scrollHeight
-              }
+      // Build Talker system prompt with full context (same as chat())
+      const os = getOsState()
+      const dynamicContext = typeof ContextAssembler !== 'undefined'
+        ? ContextAssembler.getContext('worker-results')
+        : ''
+
+      // Use Talker's system prompt + full conversation history
+      const systemNudge = `[SYSTEM] Workers have completed. Report the results to the user.\n${intentContext}`
+
+      await ai.think(systemNudge, {
+        system: buildTalkerSystem(os, dynamicContext),
+        stream: true,
+        history: messages.slice(-20),
+        tools: [],
+        emit: (type, data) => {
+          if (type === 'token') {
+            const token = typeof data === 'string' ? data : (data?.text || '')
+            if (token) {
+              fullReply += token
+              bubble.textContent = cleanReply(fullReply)
+              bubble.parentElement.scrollTop = bubble.parentElement.scrollHeight
             }
-          },
-        }
-      )
+          }
+        },
+      })
 
       if (!fullReply.trim()) {
-        // Fallback: just show the summary
-        fullReply = summary || `Done: ${taskDesc}`
+        fullReply = 'Done.'
       }
 
-      // Final render: clean any leaked JSON
-      renderBubbleContent(bubble, cleanReply(fullReply) || summary || `Done: ${taskDesc}`)
+      renderBubbleContent(bubble, cleanReply(fullReply))
+      messages.push({ role: 'assistant', content: fullReply })
+      saveChat()
 
-      if (fullReply) {
-        messages.push({ role: 'assistant', content: fullReply })
-        saveChat()
-      }
+      // Mark intents as reported so they don't repeat
+      IntentState.markReported(...settledIds)
 
       // Speak if voice enabled
-      if (Voice?.isEnabled() && !Voice.isListening()) Voice.speak(fullReply)
+      if (Voice?.isEnabled() && !Voice.isListening()) Voice.speak(cleanReply(fullReply))
 
-      showActivity(`✅ Reported: ${taskDesc.slice(0, 40)}`)
+      showActivity('✅ Results reported')
+      setTimeout(() => setWorkerStatus(''), 3000)
     } catch (e) {
-      // Fallback: just show raw summary
-      const text = summary || `Done: ${taskDesc}`
-      addBubble('agent', text)
-      messages.push({ role: 'assistant', content: text })
-      saveChat()
+      console.error('[reportViaTalker] Error:', e.message)
+      addBubble('system', `Error reporting results: ${e.message}`)
     }
-
-    setTimeout(() => setWorkerStatus(''), 3000)
   }
 
   // Wire Scheduler to startWorker
