@@ -32,6 +32,7 @@ const server = http.createServer((req, res) => {
       const baseUrl = req.headers['x-base-url'] || 'https://api.anthropic.com'
       const apiPath = req.url.replace('/api/proxy', '') || '/v1/messages'
       const targetUrl = baseUrl + apiPath
+      console.log(`[proxy] ${req.method} ${req.url} → ${targetUrl}`)
       const headers = { 'Content-Type': 'application/json' }
       if (req.headers['x-api-key']) headers['x-api-key'] = req.headers['x-api-key']
       if (req.headers['authorization']) headers['authorization'] = req.headers['authorization']

@@ -448,23 +448,6 @@ const Agent = (() => {
     }
   }
 
-  function _legacyToIntent(action, userMsg) {
-    if (action.action === 'execute' || action.action === 'redirect') {
-      return { intents: [{ action: 'create', goal: action.task || userMsg }] }
-    } else if (action.action === 'steer') {
-      const active = typeof IntentState !== 'undefined' ? IntentState.active() : []
-      if (active.length > 0) {
-        return { intents: [{ action: 'update', id: active[active.length - 1].id, goal: action.instruction }] }
-      }
-      return { intents: [{ action: 'create', goal: action.instruction }] }
-    } else if (action.action === 'abort') {
-      const active = typeof IntentState !== 'undefined' ? IntentState.active() : []
-      return { intents: active.map(i => ({ action: 'cancel', id: i.id })) }
-    } else if (action.action === 'remember' && action.memory) {
-      return { remember: { entry: action.memory, section: action.section } }
-    }
-    return null
-  }
 
   async function chat(userMessage) {
     addBubble('user', userMessage)
@@ -482,11 +465,9 @@ const Agent = (() => {
         ? await ContextAssembler.assemble(userMessage, ai)
         : ''
 
-      // --- Unified dispatch function (used by both streaming and post-parse) ---
-      // --- Intent-based dispatch (Talker outputs intent updates, not action blocks) ---
-      // (uses module-level _dispatchIntent and _legacyToIntent)
+      // --- Intent-based dispatch (Talker outputs intent blocks) ---
 
-      // --- Streaming Dispatch: fire actions as soon as JSON is detected ---
+      // --- Streaming Dispatch: fire intents as soon as JSON is detected ---
       let _streamDispatched = false
       let _streamAction = null
 
@@ -506,24 +487,17 @@ const Agent = (() => {
             }
           }
         }
-        // Fallback: bare JSON with reply or intents or action key
+        // Fallback: bare JSON with reply or intents key
         if (!parsed) {
-          const bareMatch = text.match(/\{\s*"(?:reply|intents|action)"\s*:[\s\S]*\}/)
+          const bareMatch = text.match(/\{\s*"(?:reply|intents)"\s*:[\s\S]*\}/)
           if (bareMatch) {
             try { parsed = JSON.parse(bareMatch[0]) } catch { /* not complete yet */ return }
           } else return
         }
-        if (!parsed) return
+        if (!parsed || !parsed.intents) return
         _streamDispatched = true
         _streamAction = parsed
-
-        // New intent format: { intents: [...] }
-        if (parsed.intents) {
-          _dispatchIntent(parsed)
-        } else if (parsed.action) {
-          // Legacy action block — convert to intent
-          _dispatchIntent(_legacyToIntent(parsed, userMessage))
-        }
+        _dispatchIntent(parsed)
       }
 
       const result = await ai.think(userMessage, {
@@ -565,15 +539,19 @@ const Agent = (() => {
         renderBubbleContent(bubble, _streamAction?.reply || cleanReply(fullReply))
       } else {
         // Post-stream parse: fallback for non-streaming or missed detection
-        const actions = parseAction(fullReply)
-        const parsed = actions?.[0]
-        if (parsed) {
-          if (parsed.intents) {
-            _dispatchIntent(parsed)
-          } else if (parsed.action) {
-            _dispatchIntent(_legacyToIntent(parsed, userMessage))
+        const intentMatch = fullReply.match(/```json\s*(\{[\s\S]*?\})\s*```/) || fullReply.match(/\{\s*"(?:reply|intents)"\s*:[\s\S]*\}/)
+        if (intentMatch) {
+          try {
+            const parsed = JSON.parse(intentMatch[1] || intentMatch[0])
+            if (parsed?.intents) {
+              _dispatchIntent(parsed)
+              renderBubbleContent(bubble, parsed.reply || cleanReply(fullReply))
+            } else {
+              renderBubbleContent(bubble, cleanReply(fullReply))
+            }
+          } catch {
+            renderBubbleContent(bubble, cleanReply(fullReply))
           }
-          renderBubbleContent(bubble, parsed.reply || cleanReply(fullReply))
         } else {
           renderBubbleContent(bubble, cleanReply(fullReply))
         }
@@ -656,8 +634,8 @@ ${dynamicContext ? `## Current Context\n${dynamicContext}\n` : ''}
 
 Know the difference:
 - "What do you think about X?" → Just talk. Have opinions. Be thoughtful.
-- "Open my files" / "Play some music" / "Make me a calculator" → Execute with action blocks.
-- "Find X in my files" → Reply first ("Let me look"), then execute in background.
+- "Open my files" / "Play some music" / "Make me a calculator" → Create an intent.
+- "Find X in my files" → Reply first ("Let me look"), then create an intent.
 
 You are an operating system with these capabilities (Workers use these tools to execute tasks):
 ${Capabilities.describe()}
@@ -725,32 +703,6 @@ Be natural, concise, and have personality.`
     return sys
   }
 
-  function parseAction(text) {
-    const blocks = []
-    // Match fenced JSON blocks — use balanced brace matching instead of regex
-    const re = /```json\s*(\{[\s\S]*?\})\s*```/g
-    let m
-    while ((m = re.exec(text)) !== null) {
-      try { blocks.push(JSON.parse(m[1])) } catch {
-        // Non-greedy failed (nested braces) — try greedy from this position
-        const start = text.indexOf('{', m.index)
-        if (start >= 0) {
-          const end = text.indexOf('```', start)
-          if (end > start) {
-            try { blocks.push(JSON.parse(text.slice(start, end).trim())) } catch {}
-          }
-        }
-      }
-    }
-    // Also try bare JSON (no fences) — match action blocks or intent blocks
-    if (blocks.length === 0) {
-      const bareMatch = text.match(/\{\s*"(?:action|reply|intents)"\s*:[\s\S]*\}/)
-      if (bareMatch) {
-        try { blocks.push(JSON.parse(bareMatch[0])) } catch {}
-      }
-    }
-    return blocks.length > 0 ? blocks : null
-  }
 
   // --- Task scheduling via Scheduler ---
   function enqueueTask(taskDescription, steps, priority = 1, dependsOn = []) {
@@ -1346,8 +1298,9 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
         } else {
           // Single or no execute intents — dispatch via IntentState
           for (const intent of intents) {
-            const converted = _legacyToIntent(intent.action, intent.msg)
-            if (converted) _dispatchIntent(converted)
+            if (intent.action?.intents) {
+              _dispatchIntent(intent.action)
+            }
           }
         }
 
@@ -1417,15 +1370,21 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
         saveChat()
       }
 
-      // Parse action but don't dispatch
-      const actions = parseAction(fullReply)
-      parsedAction = actions?.[0] || null
-      renderBubbleContent(bubble, parsedAction?.reply || cleanReply(fullReply))
+      // Parse intent but don't dispatch
+      let parsedIntent = null
+      const intentMatch = fullReply.match(/```json\s*(\{[\s\S]*?\})\s*```/) || fullReply.match(/\{\s*"(?:reply|intents)"\s*:[\s\S]*\}/)
+      if (intentMatch) {
+        try {
+          const p = JSON.parse(intentMatch[1] || intentMatch[0])
+          if (p?.intents) parsedIntent = p
+        } catch {}
+      }
+      renderBubbleContent(bubble, parsedIntent?.reply || cleanReply(fullReply))
     } catch (err) {
       if (!fullReply) bubble.textContent = `Error: ${err.message}`
     }
 
-    return { reply: fullReply, action: parsedAction }
+    return { reply: fullReply, action: parsedIntent }
   }
 
   // Dispatcher notifies Talker: all workers settled, report results via Talker's full context
