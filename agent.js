@@ -221,7 +221,7 @@ const Agent = (() => {
           table += '</tr>'
         })
         table += '</tbody></table>'
-        out.push(table)
+        out.push('<div class="md-table-wrap">' + table + '</div>')
       } else {
         out.push(_blockMarkdown(lines[i]))
         i++

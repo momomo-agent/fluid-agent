@@ -414,11 +414,14 @@ del { text-decoration: line-through; color: rgba(0,0,0,0.4); }
 }
 
 /* Markdown table in chat bubbles */
+.chat-bubble .md-table-wrap {
+  overflow-x: auto; margin: 6px -4px; max-width: 100%;
+}
 .md-table {
-  width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 13px;
+  width: max-content; border-collapse: collapse; font-size: 12px; white-space: nowrap;
 }
 .md-table th, .md-table td {
-  padding: 6px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 4px 8px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 .md-table th {
   font-weight: 600; color: var(--text-primary); border-bottom: 2px solid rgba(255,255,255,0.2);
