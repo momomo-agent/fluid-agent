@@ -902,6 +902,7 @@ Be natural, concise, and have personality.`
       .map(([name, desc]) => `  - ${name}: ${desc}`)
       .join('\n')
     const workerSystem = `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
+CRITICAL: You MUST use tools to complete tasks. NEVER answer with just text — always call tools to take action. If you need information, call web_search. If you need to show results, call dynamicapp. If you need to show a location, call map. Text-only responses are failures.
 
 Current OS state:
 - Desktop size: ${os.desktopSize}
@@ -1078,6 +1079,11 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
           }
           const toolMsgs = ai.buildToolResults(turn.toolCalls, results)
           workerMessages.push(...toolMsgs)
+        }
+
+        // If Worker responded with text only (no tool calls), nudge it to use tools
+        if (turn.toolCalls.length === 0 && !workerDone) {
+          workerMessages.push({ role: 'user', content: '[SYSTEM] You must use tools to complete tasks. Do not respond with text only. Call the appropriate tool now.' })
         }
 
         if (turn.done && !workerDone) workerDone = true
