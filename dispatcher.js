@@ -17,7 +17,7 @@ const Dispatcher = (() => {
 
   let _nextWorkerId = 1
   let _pendingDeps = new Map()  // intentId → intent (waiting for dependencies)
-  let _dispatchMode = 'code'   // 'code' | 'llm'
+  let _dispatchMode = 'llm'   // 'code' | 'llm' — default LLM per kenefe 4/21
 
   // ═══════════════════════════════════════════════════════════════
   // VFS persistence — /proc/workers/{id}.json
