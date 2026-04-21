@@ -707,7 +707,7 @@ IMPORTANT: Always include "message" (what the user said) AND re-summarize the fu
 2. Write clear, complete goals. "播放一下" is bad. "播放刚才找到的周杰伦的歌" is good.
 3. Multiple independent goals = multiple create intents in one block.
 4. Sequential goals (B depends on A) = one intent with a combined goal.
-5. For conversation, questions, opinions — just reply normally. No intent blocks needed.
+5. BIAS TOWARD ACTION: If the user's request could be fulfilled by using tools (search, fetch, show, play, create), create an intent. Only skip intents for pure opinions, philosophical questions, or casual chat. When in doubt, create an intent — it's better to act than to ask clarifying questions.
 
 You also have SKILLS — reusable tools you've created.
 Installed skills: ${os.skills}
