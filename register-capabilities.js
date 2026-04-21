@@ -316,6 +316,7 @@
     description: 'Manage generative apps. Preferred: write manifest.json + view HTML + data.json + actions.json to /home/user/apps/<name>/ then call create. Also supports legacy html/css/js params. Size guide: calculator~320x420, dashboard~700x500.',
     icon: '💻',
     category: 'Apps',
+    alwaysAvailable: true,
     schema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'uninstall', 'list'] }, name: { type: 'string' }, html: { type: 'string' }, css: { type: 'string' }, js: { type: 'string' }, icon: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, description: { type: 'string' } }, required: ['action'] },
     handler: ({ action, name, html, css, js, icon, width, height, description }, ctx) => {
       const { VFS, WindowManager, showActivity } = ctx
