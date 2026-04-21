@@ -994,6 +994,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
 
         // --- LLM step ---
         turnCount++
+        const _turnT0 = Date.now()
         let turn, retries = 0
         while (retries < 3) {
           try {
@@ -1020,12 +1021,14 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
             await new Promise(r => setTimeout(r, delay))
           }
         }
+        console.log(`[Worker #${workerId}] Turn ${turnCount}: LLM ${Date.now()-_turnT0}ms, ${turn.toolCalls.length} tool calls`)
 
         workerMessages = turn.messages
 
         // --- Execute tool calls ---
         if (turn.toolCalls.length > 0) {
           const results = []
+          const _toolsT0 = Date.now()
           for (const tc of turn.toolCalls) {
             if (abort.signal.aborted) throw new Error('aborted')
             blackboard.workerLog.push({ tool: tc.name, params: tc.input, time: Date.now() })
@@ -1047,6 +1050,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
             }
           }
 
+          console.log(`[Worker #${workerId}] Turn ${turnCount}: tools exec ${Date.now()-_toolsT0}ms`)
           const toolMsgs = ai.buildToolResults(turn.toolCalls, results)
           workerMessages.push(...toolMsgs)
         }
