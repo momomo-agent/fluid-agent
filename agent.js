@@ -1205,7 +1205,7 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
   const origChat = chat
   const _chatQueue = []
   let _chatProcessing = false
-  const BATCH_WAIT_MS = 600  // Wait this long for more messages before processing
+  const BATCH_WAIT_MS = 0  // No artificial delay; batch still works if messages arrive in same tick
 
   async function _processChatQueue() {
     if (_chatProcessing) return
