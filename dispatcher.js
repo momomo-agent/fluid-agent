@@ -294,16 +294,10 @@ const Dispatcher = (() => {
     const log = result?.log || []
     console.log(`[Dispatcher] Worker #${workerId} completed → intent ${intentId}: ${summary.slice(0, 80)}`)
 
-    // "silent" means the action itself is the result (e.g. playing music) — mark reported immediately
-    const silent = summary === 'silent'
     IntentState.done(intentId, { summary, log: log.slice(-10) })
-    if (silent) {
-      IntentState.markReported(intentId)
-    } else if (_onResultsReady) {
-      // Report each completed intent immediately
-      console.log(`[Dispatcher] Intent ${intentId} completed, notifying Talker`)
-      _onResultsReady()
-    }
+
+    // Always notify Talker — let Talker decide whether to speak
+    if (_onResultsReady) _onResultsReady()
   }
 
   function workerFailed(workerId, error) {
@@ -312,10 +306,7 @@ const Dispatcher = (() => {
     console.log(`[Dispatcher] Worker #${workerId} failed → intent ${intentId}: ${error}`)
     IntentState.fail(intentId, error)
 
-    if (_onResultsReady) {
-      console.log(`[Dispatcher] Intent ${intentId} failed, notifying Talker`)
-      _onResultsReady()
-    }
+    if (_onResultsReady) _onResultsReady()
   }
 
   // Legacy compat: handleIntent for any code still calling it
