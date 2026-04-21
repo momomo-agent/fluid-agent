@@ -342,7 +342,7 @@ del { text-decoration: line-through; color: rgba(0,0,0,0.4); }
 .tm-log-entry:hover { background: var(--surface2); }
 .tm-log-idx { color: var(--text-muted); min-width: 20px; text-align: right; opacity: 0.5; }
 .tm-log-text { color: var(--text); word-break: break-all; }
-.tm-empty { padding: 16px; font-size: 12px; color: var(--text-muted); }
+.tm-empty, .plan-empty { padding: 16px; font-size: 12px; color: var(--text-muted); text-align: center; }
 .tm-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .tm-tab { padding: 5px 12px; font-size: 11px; background: none; border: none; border-radius: 6px 6px 0 0; color: var(--text-muted); cursor: pointer; transition: color 0.15s; }
 .tm-tab:hover { color: var(--text); }

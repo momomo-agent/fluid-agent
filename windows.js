@@ -878,16 +878,17 @@ ${css}
   // ── Plan ──
   function renderPlan(w, body) {
     const { goal, steps } = w.data
+    const hasSteps = steps && steps.length > 0
     body.innerHTML = `
       <div class="plan-body">
         <div class="plan-goal">${goal || 'No active task'}</div>
         <div class="plan-steps">
-          ${(steps || []).map((s, i) => `
+          ${hasSteps ? steps.map((s, i) => `
             <div class="plan-step ${s.status}">
               <div class="plan-step-icon">${stepIcon(s.status)}</div>
               <div class="plan-step-text">${s.text}</div>
             </div>
-          `).join('')}
+          `).join('') : `<div class="plan-empty">${goal ? 'Planning...' : 'Send a message to get started'}</div>`}
         </div>
       </div>
     `
