@@ -4,6 +4,11 @@
 
 const Capabilities = (() => {
   const _caps = new Map() // name → { name, description, icon, schema, handler, category, alwaysAvailable }
+  const _usage = new Map() // name → { count, lastUsed }
+
+  const RECENCY_WINDOW = 5 * 60 * 1000 // 5 minutes
+  const DECAY_WINDOW = 30 * 60 * 1000  // 30 minutes — tools unused this long get deactivated
+  const HOT_THRESHOLD = 3              // use count to become "hot"
 
   function register(name, { description, icon, schema, handler, category = 'general', alwaysAvailable = false }) {
     _caps.set(name, { name, description, icon: icon || '🔧', schema, handler, category, alwaysAvailable })
@@ -64,5 +69,34 @@ const Capabilities = (() => {
 
   function count() { return _caps.size }
 
-  return { register, unregister, get, has, getToolDefs, getHandlers, getAlwaysAvailable, describe, catalog, list, count }
+  // Track tool usage
+  function recordUse(name) {
+    const u = _usage.get(name) || { count: 0, lastUsed: 0 }
+    u.count++
+    u.lastUsed = Date.now()
+    _usage.set(name, u)
+  }
+
+  // Get dynamically active tool names: always available + recently used + hot (frequently used)
+  function getActiveDynamic() {
+    const now = Date.now()
+    const active = new Set(getAlwaysAvailable())
+    for (const [name, u] of _usage) {
+      if (!_caps.has(name)) continue
+      // Recently used (within recency window)
+      if (now - u.lastUsed < RECENCY_WINDOW) { active.add(name); continue }
+      // Hot tool (used enough times and not decayed)
+      if (u.count >= HOT_THRESHOLD && now - u.lastUsed < DECAY_WINDOW) { active.add(name); continue }
+    }
+    return [...active]
+  }
+
+  // Get usage stats (for debugging)
+  function getUsageStats() {
+    const stats = {}
+    for (const [name, u] of _usage) stats[name] = { ...u, ago: Math.round((Date.now() - u.lastUsed) / 1000) + 's' }
+    return stats
+  }
+
+  return { register, unregister, get, has, getToolDefs, getHandlers, getAlwaysAvailable, getActiveDynamic, recordUse, getUsageStats, describe, catalog, list, count }
 })()

@@ -826,7 +826,8 @@ Be natural, concise, and have personality.`
 
     // --- Tool Search: deferred tool loading ---
     const alwaysAvailable = new Set(Capabilities.getAlwaysAvailable())
-    const loadedTools = new Set([...alwaysAvailable])
+    const dynamicActive = new Set(Capabilities.getActiveDynamic())
+    const loadedTools = new Set([...dynamicActive])
     const toolCatalog = Capabilities.catalog()
 
     // search_tools meta-tool: wired up here because it needs loadedTools closure
@@ -886,9 +887,9 @@ Be natural, concise, and have personality.`
 
     // --- Turn Loop: ai.step() with Dispatcher checkpoints ---
     const os = getOsState()
-    const alwaysNames = Capabilities.getAlwaysAvailable().join(', ')
+    const activeNames = [...loadedTools].join(', ')
     const extendedToolList = Object.entries(toolCatalog)
-      .filter(([name]) => !alwaysAvailable.has(name))
+      .filter(([name]) => !loadedTools.has(name))
       .map(([name, desc]) => `  - ${name}: ${desc}`)
       .join('\n')
     const workerSystem = `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
@@ -904,9 +905,9 @@ Planned steps:
 ${steps.length ? steps.map((s, i) => `${i}. ${s.text}`).join('\n') : '(none — call plan_steps first to set your execution plan)'}
 
 ## Tool System
-Always available: ${alwaysNames}.
+Active tools: ${activeNames}.
 
-All other tools — call search_tools({names: [...]}) to activate:
+More tools available — call search_tools({names: [...]}) to activate:
 ${extendedToolList}
 
 PREFER native apps over browser. Use music for music, map for locations, video for videos.
@@ -1036,6 +1037,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
             task.log.push(`${tc.name}: ${JSON.stringify(tc.input).slice(0, 60)}`)
 
             const handler = allHandlers[tc.name]
+            Capabilities.recordUse(tc.name)
             const result = handler ? await handler(tc.input) : { error: `Unknown tool: ${tc.name}` }
             results.push(result)
             WindowManager.updateTask(task)
