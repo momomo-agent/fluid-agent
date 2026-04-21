@@ -169,7 +169,7 @@ const Agent = (() => {
     const AgenticClass = typeof Agentic === 'function' ? Agentic : Agentic.Agentic
     ai = new AgenticClass(opts)
     // configure call removed — embed passed via constructor
-    if (typeof Dispatcher !== 'undefined') Dispatcher.init(ai, storeInstance || null)
+    if (typeof Dispatcher !== 'undefined') Dispatcher.init(ai)
     if (typeof IntentState !== 'undefined') IntentState.init()
 
     // Wire Dispatcher → Talker: when all workers complete, Talker reports results
@@ -1463,10 +1463,7 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
   }
 
   // Wire Scheduler to startWorker
-  Scheduler._onStart = (entry, slotIndex, abort) => startWorker(
-    typeof entry.task === 'string' ? entry.task : entry.task.description || JSON.stringify(entry.task),
-    entry.steps, abort
-  )
+  Scheduler._onStart = (task, steps, abort, opts) => startWorker(task, steps, abort, opts)
 
   // Resume an unfinished task from checkpoint
   async function resumeTask(workerId) {

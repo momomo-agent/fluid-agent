@@ -1,13 +1,12 @@
-/* dispatcher.js - Intent-driven Scheduler v3
+/* dispatcher.js - Intent-driven Dispatcher v4
  *
  * Watches IntentState for changes, maps intent actions to scheduling decisions.
- * Maintains intentId → workerId mapping.
+ * All state persisted to VFS under /proc/workers/ — no separate checkpoint store.
  *
  * Talker writes intents → IntentState → Dispatcher reacts → Scheduler executes
  */
 const Dispatcher = (() => {
   let _ai = null
-  let _store = null
   const _workers = new Map()       // workerId → Worker state
   const _intentWorker = new Map()  // intentId → workerId
   const _workerIntent = new Map()  // workerId → intentId
@@ -18,16 +17,127 @@ const Dispatcher = (() => {
 
   let _nextWorkerId = 1
 
-  function init(ai, store) {
+  // ═══════════════════════════════════════════════════════════════
+  // VFS persistence — /proc/workers/{id}.json
+  // ═══════════════════════════════════════════════════════════════
+
+  const PROC_DIR = '/proc/workers'
+
+  function _ensureProcDir() {
+    if (typeof VFS !== 'undefined' && !VFS.isDir(PROC_DIR)) {
+      VFS.mkdir(PROC_DIR)
+    }
+  }
+
+  function _saveWorker(workerId) {
+    if (typeof VFS === 'undefined') return
+    _ensureProcDir()
+    const w = _workers.get(workerId)
+    if (!w) return
+    const intentId = _workerIntent.get(workerId)
+    VFS.writeFile(`${PROC_DIR}/${workerId}.json`, JSON.stringify({
+      id: w.id,
+      task: w.task,
+      status: w.status,
+      steps: w.steps || [],
+      completedSteps: w.completedSteps || [],
+      turnCount: w.turnCount || 0,
+      intentId: intentId || null,
+      messages: (w.messages || []).slice(-20),  // keep last 20 turns for resume
+      system: w.system || '',
+      tools: w.tools || [],
+      createdAt: w.createdAt || Date.now(),
+      updatedAt: Date.now(),
+      totalTokens: w.totalTokens || 0,
+      toolCallCount: w.toolCallCount || 0,
+    }, null, 2))
+  }
+
+  function _removeWorkerFile(workerId) {
+    if (typeof VFS !== 'undefined' && VFS.isFile(`${PROC_DIR}/${workerId}.json`)) {
+      VFS.rm(`${PROC_DIR}/${workerId}.json`)
+    }
+  }
+
+  function _saveMeta() {
+    if (typeof VFS === 'undefined') return
+    _ensureProcDir()
+    VFS.writeFile(`${PROC_DIR}/meta.json`, JSON.stringify({
+      nextWorkerId: _nextWorkerId,
+      intentWorker: Object.fromEntries(_intentWorker),
+      workerIntent: Object.fromEntries(_workerIntent),
+    }, null, 2))
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Init + Restore
+  // ═══════════════════════════════════════════════════════════════
+
+  function init(ai) {
     _ai = ai
-    _store = store
-    if (store) CheckpointStore.init(store)
+    _ensureProcDir()
+
+    // Restore state from VFS
+    _restore()
 
     // Watch IntentState for changes
     if (typeof IntentState !== 'undefined') {
       IntentState.onChange((action, intent) => {
         _handleIntentChange(action, intent)
       })
+    }
+  }
+
+  function _restore() {
+    if (typeof VFS === 'undefined') return
+
+    // Restore meta
+    if (VFS.isFile(`${PROC_DIR}/meta.json`)) {
+      try {
+        const meta = JSON.parse(VFS.readFile(`${PROC_DIR}/meta.json`))
+        _nextWorkerId = meta.nextWorkerId || 1
+        if (meta.intentWorker) {
+          for (const [k, v] of Object.entries(meta.intentWorker)) {
+            _intentWorker.set(k, v)
+          }
+        }
+        if (meta.workerIntent) {
+          for (const [k, v] of Object.entries(meta.workerIntent)) {
+            _workerIntent.set(Number(k), v)
+          }
+        }
+      } catch { /* corrupt meta, start fresh */ }
+    }
+
+    // Restore workers
+    const entries = VFS.ls(PROC_DIR)
+    if (!entries) return
+    for (const entry of entries) {
+      if (entry.name === 'meta.json' || !entry.name.endsWith('.json')) continue
+      try {
+        const data = JSON.parse(VFS.readFile(`${PROC_DIR}/${entry.name}`))
+        _workers.set(data.id, {
+          id: data.id,
+          task: data.task,
+          status: data.status === 'running' ? 'suspended' : data.status,  // running → suspended on restore
+          steps: data.steps || [],
+          completedSteps: data.completedSteps || [],
+          turnCount: data.turnCount || 0,
+          messages: data.messages || [],
+          system: data.system || '',
+          tools: data.tools || [],
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+          totalTokens: data.totalTokens || 0,
+          toolCallCount: data.toolCallCount || 0,
+        })
+        if (data.id >= _nextWorkerId) _nextWorkerId = data.id + 1
+      } catch { /* skip corrupt files */ }
+    }
+
+    const suspended = Array.from(_workers.values()).filter(w => w.status === 'suspended')
+    if (suspended.length > 0) {
+      console.log(`[Dispatcher] Restored ${suspended.length} suspended workers from VFS`)
     }
   }
 
@@ -40,37 +150,33 @@ const Dispatcher = (() => {
 
     switch (action) {
       case 'create': {
-        // New intent → mark running + spawn a Worker
         IntentState.running(intent.id)
         const workerId = _nextWorkerId++
         _intentWorker.set(intent.id, workerId)
         _workerIntent.set(workerId, intent.id)
+        _saveMeta()
         EventBus.emit('dispatcher.spawn', { intentId: intent.id, workerId, task: intent.goal })
-        // Enqueue in Scheduler
         Scheduler.enqueue(intent.goal, [], 1, [], { intentId: intent.id, workerId })
         break
       }
 
       case 'update': {
-        // Intent updated → steer existing Worker with full context
         const workerId = _intentWorker.get(intent.id)
         if (workerId != null) {
           const w = _workers.get(workerId)
           if (w && w.status === 'running') {
-            // Build steer instruction from goal + recent messages
             const context = intent.messages.length > 0
               ? `Goal: ${intent.goal}\nUser messages: ${intent.messages.slice(-3).join(' → ')}`
               : intent.goal
             w.task = intent.goal
+            _saveWorker(workerId)
             EventBus.emit('dispatcher.steer', { workerId, instruction: context })
             Scheduler.steer(w.schedulerTaskId || null, context)
-            console.log(`[Dispatcher] Steered Worker #${workerId} → "${intent.goal.slice(0, 60)}"`)  
+            console.log(`[Dispatcher] Steered Worker #${workerId} → "${intent.goal.slice(0, 60)}"`)
           } else {
-            // Worker finished/not started yet — re-enqueue with updated goal
             Scheduler.enqueue(intent.goal, [], 1, [], { intentId: intent.id, workerId })
           }
         } else {
-          // No worker for this intent yet (shouldn't happen, but handle gracefully)
           _handleIntentChange('create', intent)
         }
         break
@@ -79,212 +185,153 @@ const Dispatcher = (() => {
       case 'cancel': {
         const workerId = _intentWorker.get(intent.id)
         if (workerId != null) {
+          const w = _workers.get(workerId)
+          if (w) {
+            w.status = 'cancelled'
+            _saveWorker(workerId)
+          }
           Scheduler.abort(workerId)
-          _cleanup(workerId)
-          EventBus.emit('dispatcher.abort', { workerId, reason: 'intent_cancelled' })
+          EventBus.emit('dispatcher.cancel', { workerId, intentId: intent.id })
+          console.log(`[Dispatcher] Cancelled Worker #${workerId}`)
         }
         break
       }
 
-      case 'done': {
-        const workerId = _intentWorker.get(intent.id)
-        if (workerId != null) {
-          _cleanup(workerId)
-        }
+      case 'running':
         break
-      }
+
+      case 'done':
+      case 'failed':
+        break
     }
   }
 
-  function _cleanup(workerId) {
-    const intentId = _workerIntent.get(workerId)
-    _workers.delete(workerId)
-    _workerIntent.delete(workerId)
-    if (intentId) _intentWorker.delete(intentId)
-    if (_store) CheckpointStore.markDone(String(workerId)).catch(() => {})
-  }
-
   // ═══════════════════════════════════════════════════════════════
-  // Worker Registry (called by agent.js worker loop)
+  // Worker lifecycle
   // ═══════════════════════════════════════════════════════════════
 
-  function registerWorker(id, task, steps, opts = {}) {
-    _workers.set(id, {
-      id,
+  function nextWorkerId() { return _nextWorkerId }
+
+  function registerWorker(workerId, task, steps) {
+    _workers.set(workerId, {
+      id: workerId,
       task,
-      steps,
+      steps: steps || [],
+      completedSteps: [],
       status: 'running',
       turnCount: 0,
-      stallTurns: 0,
-      lastTool: null,
-      lastResult: null,
-      lastResultSummary: '',
-      priority: opts.priority || 1,
+      messages: [],
+      system: '',
+      tools: [],
       createdAt: Date.now(),
-      suspendedAt: null,
-      messages: opts.messages || [],
-      tools: opts.tools || [],
-      system: opts.system || '',
-      completedSteps: [],
       totalTokens: 0,
       toolCallCount: 0,
-      schedulerTaskId: opts.schedulerTaskId || null,
     })
+    _saveWorker(workerId)
+    _logDecision(workerId, 'start', `Started: ${task.slice(0, 60)}`)
   }
 
-  function updateWorker(id, update) {
-    const w = _workers.get(id)
-    if (!w) return
-    Object.assign(w, update)
-    if (update.lastResult) {
-      w.stallTurns = 0
-    } else if (update.turnCount > w.turnCount) {
-      w.stallTurns++
-    }
-  }
-
-  function removeWorker(id) { _cleanup(id) }
-  function getWorker(id) { return _workers.get(id) }
-  function nextWorkerId() { return _nextWorkerId++ }
-
-  // ═══════════════════════════════════════════════════════════════
-  // Worker turn lifecycle (guardrails)
-  // ═══════════════════════════════════════════════════════════════
-
-  async function beforeTurn(workerId) {
-    return { action: 'continue' }
-  }
-
-  async function afterTurn(workerId, turnResult) {
+  function updateWorker(workerId, updates) {
     const w = _workers.get(workerId)
-    if (!w) return { action: 'continue' }
-
-    w.turnCount++
-    if (turnResult.toolCalls?.length) {
-      w.lastTool = turnResult.toolCalls[0].name
-      w.toolCallCount += turnResult.toolCalls.length
-      w.stallTurns = 0
-    }
-    if (turnResult.text) {
-      w.lastResultSummary = turnResult.text.slice(0, 100)
-      w.stallTurns = 0
-    }
-
-    // Checkpoint
-    if (_store) {
-      const checkpoint = CheckpointStore.buildCheckpoint(w, {
-        workers: Array.from(_workers.values()).map(wk => ({ id: wk.id, task: wk.task, status: wk.status })),
-        decisionLog: _decisionLog.slice(-10),
-      })
-      await CheckpointStore.save(String(workerId), w.turnCount, checkpoint)
-    }
-
-    // Guardrails
-    if (w.turnCount >= MAX_TURNS) {
-      _logDecision({ action: 'abort', workerId, reason: 'max_turns_exceeded' }, null, 'guardrail')
-      return { action: 'abort', workerId, reason: 'max_turns_exceeded' }
-    }
-    if (w.stallTurns >= STALL_THRESHOLD) {
-      _logDecision({ action: 'steer', workerId, instruction: '你似乎卡住了,尝试换个方法或总结当前进度' }, null, 'guardrail')
-      return { action: 'steer', workerId, instruction: '你似乎卡住了,尝试换个方法或总结当前进度' }
-    }
-
-    return { action: 'continue' }
+    if (!w) return
+    Object.assign(w, updates)
+    _saveWorker(workerId)
   }
+
+  function removeWorker(workerId) {
+    _workers.delete(workerId)
+    // Keep the VFS file for history — mark as done
+    // _removeWorkerFile(workerId)  // uncomment to clean up immediately
+  }
+
+  function getWorker(id) { return _workers.get(id) }
 
   // ═══════════════════════════════════════════════════════════════
-  // State for Talker's system prompt
+  // Turn management
   // ═══════════════════════════════════════════════════════════════
 
-  function getStateSummary() {
-    return {
-      workers: Array.from(_workers.values()).map(w => ({
-        id: w.id,
-        task: w.task.slice(0, 60),
-        status: w.status,
-        turnCount: w.turnCount,
-        lastTool: w.lastTool,
-        priority: w.priority,
-        elapsed: Math.round((Date.now() - w.createdAt) / 1000),
-        intentId: _workerIntent.get(w.id) || null,
-      })),
-      freeSlots: Scheduler.MAX_SLOTS - Array.from(_workers.values()).filter(w => w.status === 'running').length,
+  function beforeTurn(workerId) {
+    const w = _workers.get(workerId)
+    if (!w) return { abort: false }
+    w.turnCount = (w.turnCount || 0) + 1
+
+    if (w.turnCount > MAX_TURNS) {
+      _logDecision(workerId, 'abort', `Max turns (${MAX_TURNS}) exceeded`)
+      return { abort: true, reason: `Maximum turns (${MAX_TURNS}) reached` }
     }
+    return { abort: false }
   }
 
-  function getState() {
-    const s = getStateSummary()
-    return {
-      running: s.workers.filter(w => w.status === 'running'),
-      pending: s.workers.filter(w => w.status === 'suspended'),
+  function afterTurn(workerId, turnResult) {
+    const w = _workers.get(workerId)
+    if (!w) return
+
+    // Track tokens
+    if (turnResult?.usage) {
+      w.totalTokens = (w.totalTokens || 0) + (turnResult.usage.input_tokens || 0) + (turnResult.usage.output_tokens || 0)
     }
-  }
-
-  function formatForTalker() {
-    const s = getStateSummary()
-    const activeIntents = typeof IntentState !== 'undefined' ? IntentState.active() : []
-
-    if (s.workers.length === 0 && activeIntents.length === 0) {
-      return '\n## System State\nNo active tasks. Ready for new work.\n'
+    if (turnResult?.toolCalls) {
+      w.toolCallCount = (w.toolCallCount || 0) + turnResult.toolCalls.length
     }
 
-    let out = '\n## System State\n'
-    if (s.workers.length) {
-      out += 'Workers:\n'
-      for (const w of s.workers) {
-        const intentId = w.intentId ? ` [${w.intentId}]` : ''
-        out += `- #${w.id}${intentId}: "${w.task}" [${w.status}] (turn ${w.turnCount}, last: ${w.lastTool || 'none'})\n`
+    // Stall detection
+    if (turnResult?.noProgress) {
+      w.stallCount = (w.stallCount || 0) + 1
+      if (w.stallCount >= STALL_THRESHOLD) {
+        _logDecision(workerId, 'stall', `Stalled ${w.stallCount} turns`)
       }
+    } else {
+      w.stallCount = 0
     }
-    out += `Slots: ${Scheduler.MAX_SLOTS - s.freeSlots}/${Scheduler.MAX_SLOTS}\n`
-    return out
+
+    // Save state to VFS after every turn
+    _saveWorker(workerId)
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Resume from checkpoint
+  // Resume
   // ═══════════════════════════════════════════════════════════════
 
   async function checkForResume() {
-    if (!_store) return []
-    return await CheckpointStore.listUnfinished()
+    const suspended = Array.from(_workers.values()).filter(w => w.status === 'suspended')
+    return suspended.map(w => ({
+      workerId: w.id,
+      task: w.task,
+      turnCount: w.turnCount,
+      updatedAt: w.updatedAt,
+    }))
   }
 
   async function resumeWorker(workerId) {
-    const checkpoint = await CheckpointStore.restoreLatest(String(workerId))
-    if (!checkpoint) return null
-    registerWorker(workerId, checkpoint.task, checkpoint.worker.steps, {
-      priority: 1,
-      messages: checkpoint.worker.messages,
-      tools: checkpoint.worker.tools,
-      system: checkpoint.worker.system,
-    })
     const w = _workers.get(workerId)
-    if (w) {
-      w.turnCount = checkpoint.turnIndex
-      w.completedSteps = checkpoint.worker.completedSteps
+    if (!w) return null
+    w.status = 'running'
+    _saveWorker(workerId)
+    return {
+      task: w.task,
+      steps: w.steps,
+      completedSteps: w.completedSteps,
+      messages: w.messages,
+      system: w.system,
+      tools: w.tools,
+      turnCount: w.turnCount,
     }
-    EventBus.emit('dispatcher.resumed', { workerId, fromTurn: checkpoint.turnIndex })
-    return checkpoint
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Helpers
+  // Completion
   // ═══════════════════════════════════════════════════════════════
 
-  function _logDecision(decision, obs, source) {
-    _decisionLog.push({ ...decision, source, timestamp: Date.now() })
-    if (_decisionLog.length > MAX_LOG) _decisionLog.shift()
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // Worker → Dispatcher → IntentState (the completion flow)
-  // ═══════════════════════════════════════════════════════════════
-
-  let _onResultsReady = null  // callback: Dispatcher tells Talker "results are ready"
-
+  let _onResultsReady = null
   function onResultsReady(fn) { _onResultsReady = fn }
 
   function workerCompleted(workerId, result) {
+    const w = _workers.get(workerId)
+    if (w) {
+      w.status = 'done'
+      _saveWorker(workerId)
+    }
+
     const intentId = _workerIntent.get(workerId)
     if (!intentId) {
       console.warn(`[Dispatcher] workerCompleted: no intent for worker #${workerId}`)
@@ -295,35 +342,85 @@ const Dispatcher = (() => {
     console.log(`[Dispatcher] Worker #${workerId} completed → intent ${intentId}: ${summary.slice(0, 80)}`)
 
     IntentState.done(intentId, { summary, log: log.slice(-10) })
-
-    // Always notify Talker — let Talker decide whether to speak
     if (_onResultsReady) _onResultsReady()
   }
 
   function workerFailed(workerId, error) {
+    const w = _workers.get(workerId)
+    if (w) {
+      w.status = 'failed'
+      w.error = typeof error === 'string' ? error : (error?.message || 'Unknown error')
+      _saveWorker(workerId)
+    }
+
     const intentId = _workerIntent.get(workerId)
     if (!intentId) return
     console.log(`[Dispatcher] Worker #${workerId} failed → intent ${intentId}: ${error}`)
     IntentState.fail(intentId, error)
-
     if (_onResultsReady) _onResultsReady()
   }
 
-  // Legacy compat: handleIntent for any code still calling it
-  function handleIntent(intent, priority) {
-    console.warn('[Dispatcher] handleIntent is deprecated, use IntentState.create/update instead')
-    if (typeof IntentState !== 'undefined') {
-      IntentState.create(intent?.task || intent)
+  // ═══════════════════════════════════════════════════════════════
+  // State queries
+  // ═══════════════════════════════════════════════════════════════
+
+  function _logDecision(workerId, type, detail) {
+    _decisionLog.push({ workerId, type, detail, at: Date.now() })
+    if (_decisionLog.length > MAX_LOG) _decisionLog.shift()
+  }
+
+  function getStateSummary() {
+    const workers = Array.from(_workers.values())
+    return {
+      workers: workers.map(w => ({ id: w.id, task: w.task, status: w.status })),
+      freeSlots: Scheduler.MAX_SLOTS - workers.filter(w => w.status === 'running').length,
+    }
+  }
+
+  function getState() {
+    return {
+      workers: Array.from(_workers.values()).map(w => ({
+        id: w.id, task: w.task, status: w.status,
+        turnCount: w.turnCount, totalTokens: w.totalTokens,
+      })),
+      freeSlots: Scheduler.MAX_SLOTS - Array.from(_workers.values()).filter(w => w.status === 'running').length,
+    }
+  }
+
+  function formatForTalker() {
+    const workers = Array.from(_workers.values()).filter(w => w.status === 'running' || w.status === 'suspended')
+    if (workers.length === 0) return ''
+    let out = '\n## Active Workers\n'
+    for (const w of workers) {
+      out += `- Worker #${w.id}: "${w.task.slice(0, 60)}" (${w.status}, turn ${w.turnCount})\n`
+    }
+    return out
+  }
+
+  // GC: clean up old done/failed worker files
+  function gc(keepMs = 7 * 86400_000) {
+    if (typeof VFS === 'undefined') return
+    const entries = VFS.ls(PROC_DIR)
+    if (!entries) return
+    const cutoff = Date.now() - keepMs
+    for (const entry of entries) {
+      if (entry.name === 'meta.json' || !entry.name.endsWith('.json')) continue
+      try {
+        const data = JSON.parse(VFS.readFile(`${PROC_DIR}/${entry.name}`))
+        if ((data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') && data.updatedAt < cutoff) {
+          VFS.rm(`${PROC_DIR}/${entry.name}`)
+          _workers.delete(data.id)
+        }
+      } catch {}
     }
   }
 
   return {
     init, registerWorker, updateWorker, removeWorker, getWorker, nextWorkerId,
-    handleIntent,
     beforeTurn, afterTurn,
     checkForResume, resumeWorker,
     workerCompleted, workerFailed, onResultsReady,
-    getStateSummary, getState, formatForTalker,
+    getStateSummary, getState, formatForTalker, gc,
     get decisionLog() { return _decisionLog },
   }
 })()

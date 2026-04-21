@@ -1,18 +1,91 @@
-/* scheduler.js — Task scheduler with parallel slots, retry, persistence, and preemption */
+/* scheduler.js — Task scheduler with parallel slots, retry, and VFS persistence */
 const Scheduler = (() => {
   const MAX_SLOTS = 3
   const MAX_RETRIES = 2
-  const RETRY_BASE_MS = 1000  // exponential backoff: 1s, 2s, 4s
+  const RETRY_BASE_MS = 1000
   let nextTaskId = 1
   const pending = []       // { id, task, steps, priority, dependsOn, status:'pending', retryCount:0 }
   const slots = new Map()  // slotIndex → { id, task, steps, priority, abort, status:'running' }
   const completed = []     // last N completed tasks
-  let _store = null        // agentic-store for persistence
 
-  // --- Task lifecycle ---
+  const PROC_DIR = '/proc/scheduler'
+
+  // ═══════════════════════════════════════════════════════════════
+  // VFS persistence
+  // ═══════════════════════════════════════════════════════════════
+
+  function _ensureProcDir() {
+    if (typeof VFS !== 'undefined' && !VFS.isDir(PROC_DIR)) {
+      VFS.mkdir(PROC_DIR)
+    }
+  }
+
+  function _save() {
+    if (typeof VFS === 'undefined') return
+    _ensureProcDir()
+    VFS.writeFile(`${PROC_DIR}/state.json`, JSON.stringify({
+      nextTaskId,
+      pending: pending.map(t => ({
+        id: t.id, task: t.task, steps: t.steps, priority: t.priority,
+        dependsOn: t.dependsOn, status: t.status, retryCount: t.retryCount || 0,
+        meta: t.meta || {},
+      })),
+      slots: Array.from(slots.entries()).map(([idx, s]) => ({
+        slotIndex: idx, id: s.id, task: s.task, steps: s.steps,
+        priority: s.priority, status: s.status, meta: s.meta || {},
+      })),
+      completed: completed.slice(-20).map(t => ({
+        id: t.id, task: t.task, status: t.status,
+      })),
+    }, null, 2))
+  }
+
+  function _restore() {
+    if (typeof VFS === 'undefined') return
+    if (!VFS.isFile(`${PROC_DIR}/state.json`)) return
+
+    try {
+      const data = JSON.parse(VFS.readFile(`${PROC_DIR}/state.json`))
+      nextTaskId = data.nextTaskId || 1
+
+      // Restore completed (for dependency resolution)
+      if (data.completed) completed.push(...data.completed)
+
+      // Restore pending tasks
+      if (data.pending) {
+        for (const t of data.pending) {
+          if (t.status === 'pending') pending.push(t)
+        }
+      }
+
+      // Tasks that were running in slots → back to pending (will be re-scheduled)
+      if (data.slots) {
+        for (const s of data.slots) {
+          if (s.status === 'running') {
+            pending.push({
+              id: s.id, task: s.task, steps: s.steps || [],
+              priority: s.priority, dependsOn: [], status: 'pending',
+              retryCount: 0, meta: s.meta || {},
+            })
+          }
+        }
+      }
+
+      pending.sort((a, b) => a.priority - b.priority)
+
+      if (pending.length > 0) {
+        console.log(`[Scheduler] Restored ${pending.length} pending tasks from VFS`)
+        schedule()
+      }
+    } catch { /* corrupt state, start fresh */ }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Task lifecycle
+  // ═══════════════════════════════════════════════════════════════
 
   function enqueue(taskDescription, steps = [], priority = 1, dependsOn = [], meta = {}) {
-    // Dedup: skip if same task is already pending or running
+    // Dedup
     const norm = taskDescription.trim().toLowerCase()
     const isDup = pending.some(t => t.task.trim().toLowerCase() === norm && t.status === 'pending')
       || Array.from(slots.values()).some(s => s.task.trim().toLowerCase() === norm && s.status === 'running')
@@ -21,28 +94,25 @@ const Scheduler = (() => {
       return -1
     }
     const id = nextTaskId++
-    const entry = { id, task: taskDescription, steps, priority, dependsOn, status: 'pending', ...meta }
+    const entry = { id, task: taskDescription, steps, priority, dependsOn, status: 'pending', retryCount: 0, meta }
     pending.push(entry)
     pending.sort((a, b) => a.priority - b.priority)
     EventBus.emit('scheduler.enqueued', { id, task: taskDescription, priority })
+    _save()
     schedule()
     return id
   }
 
   function schedule() {
-    // Try to fill empty slots with ready tasks
     for (let i = 0; i < MAX_SLOTS; i++) {
       if (slots.has(i)) continue
       const ready = findReady()
       if (!ready) break
 
-      // Preemption: if ready task is urgent (0) and all slots are busy with background (2),
-      // pause the lowest-priority background task
       if (!ready && pending.some(t => t.priority === 0)) {
         const bgSlot = findLowestPrioritySlot()
         if (bgSlot !== null && slots.get(bgSlot).priority >= 2) {
           pauseSlot(bgSlot)
-          // Now slot is free, find ready again
           const urgent = findReady()
           if (urgent) startInSlot(i, urgent)
         }
@@ -57,7 +127,6 @@ const Scheduler = (() => {
     for (let i = 0; i < pending.length; i++) {
       const t = pending[i]
       if (t.status !== 'pending') continue
-      // Check dependencies
       const depsOk = t.dependsOn.every(depId =>
         completed.some(c => c.id === depId && c.status === 'done')
       )
@@ -78,113 +147,114 @@ const Scheduler = (() => {
   }
 
   function startInSlot(slotIndex, entry) {
-    const abort = new AbortController()
+    const abortController = { aborted: false }
     entry.status = 'running'
-    entry.abort = abort
+    entry.abort = abortController
+    entry.schedulerSlot = slotIndex
     slots.set(slotIndex, entry)
-    const depInfo = entry.dependsOn?.length ? ` (deps: [${entry.dependsOn}] satisfied)` : ''
-    EventBus.emit('scheduler.started', { id: entry.id, slot: slotIndex, task: entry.task, depInfo })
-    // The actual worker execution is handled by the callback
+    _save()
+
+    console.log(`[Scheduler] Slot ${slotIndex}: starting "${entry.task.slice(0, 60)}" (id=${entry.id}, pri=${entry.priority})`)
+
     if (Scheduler._onStart) {
-      Scheduler._onStart(entry, slotIndex, abort).then(() => {
-        finishSlot(slotIndex, 'done')
-      }).catch(err => {
-        if (err.message === 'aborted' || abort.signal.aborted) {
-          finishSlot(slotIndex, 'aborted')
-        } else {
-          // Retry with exponential backoff
-          const retries = entry.retryCount || 0
-          if (retries < MAX_RETRIES) {
-            entry.retryCount = retries + 1
-            entry.status = 'pending'
-            const delay = RETRY_BASE_MS * Math.pow(2, retries)
-            console.log(`[Scheduler] Task ${entry.id} failed (${err.message}), retry ${entry.retryCount}/${MAX_RETRIES} in ${delay}ms`)
-            EventBus.emit('scheduler.retry', { id: entry.id, retry: entry.retryCount, delay, error: err.message })
-            slots.delete(slotIndex)
-            setTimeout(() => { pending.unshift(entry); schedule() }, delay)
-          } else {
-            console.log(`[Scheduler] Task ${entry.id} failed after ${MAX_RETRIES} retries: ${err.message}`)
-            finishSlot(slotIndex, 'error', err.message)
-          }
-        }
+      Scheduler._onStart(entry.task, entry.steps, abortController, {
+        workerId: entry.meta?.workerId || entry.workerId,
+        resume: entry.meta?.resume || false,
+        messages: entry.meta?.messages,
+        system: entry.meta?.system,
+        tools: entry.meta?.tools,
       })
+        .then(result => finishSlot(slotIndex, entry, 'done', result))
+        .catch(err => {
+          if (abortController.aborted) {
+            finishSlot(slotIndex, entry, 'aborted')
+          } else {
+            retryOrFail(slotIndex, entry, err)
+          }
+        })
     }
   }
 
-  function finishSlot(slotIndex, status, error) {
-    const entry = slots.get(slotIndex)
-    if (!entry) return
-    entry.status = status
-    if (error) entry.error = error
-    completed.push(entry)
-    if (completed.length > 20) completed.shift()
+  function finishSlot(slotIndex, entry, status, result) {
     slots.delete(slotIndex)
-    EventBus.emit('scheduler.finished', { id: entry.id, slot: slotIndex, status })
-    // Try to fill the freed slot
+    entry.status = status
+    completed.push({ id: entry.id, task: entry.task, status, result })
+    if (completed.length > 50) completed.shift()
+    EventBus.emit('scheduler.finished', { id: entry.id, task: entry.task, status, result })
+    _save()
     schedule()
+  }
+
+  function retryOrFail(slotIndex, entry, error) {
+    entry.retryCount = (entry.retryCount || 0) + 1
+    if (entry.retryCount <= MAX_RETRIES) {
+      console.log(`[Scheduler] Retry ${entry.retryCount}/${MAX_RETRIES} for "${entry.task.slice(0, 40)}"`)
+      slots.delete(slotIndex)
+      entry.status = 'pending'
+      pending.push(entry)
+      EventBus.emit('scheduler.retry', { id: entry.id, attempt: entry.retryCount })
+      _save()
+      setTimeout(() => schedule(), RETRY_BASE_MS * Math.pow(2, entry.retryCount - 1))
+    } else {
+      finishSlot(slotIndex, entry, 'error', { error: error?.message || String(error) })
+    }
   }
 
   function pauseSlot(slotIndex) {
     const entry = slots.get(slotIndex)
     if (!entry) return
-    entry.abort.abort()
-    entry.status = 'paused'
-    // Re-queue with same priority
-    pending.unshift(entry)
+    if (entry.abort) entry.abort.aborted = true
     slots.delete(slotIndex)
-    EventBus.emit('scheduler.paused', { id: entry.id, slot: slotIndex })
+    entry.status = 'pending'
+    entry.priority = 2
+    pending.push(entry)
+    _save()
+    console.log(`[Scheduler] Paused slot ${slotIndex}: "${entry.task.slice(0, 40)}"`)
   }
 
-  // --- Steer / Abort ---
+  // ═══════════════════════════════════════════════════════════════
+  // Steer / Abort
+  // ═══════════════════════════════════════════════════════════════
 
   function steer(taskId, instruction) {
-    // Find in running slots
-    for (const [idx, s] of slots) {
-      if (taskId == null || s.id === taskId) {
-        EventBus.emit('scheduler.steer', { id: s.id, instruction })
+    for (const [, entry] of slots) {
+      if (entry.id === taskId || (taskId == null && entry.status === 'running')) {
+        entry.steerInstruction = instruction
+        console.log(`[Scheduler] Steered task ${entry.id}: "${instruction.slice(0, 60)}"`)
         return true
       }
     }
     return false
   }
 
-  function abort(taskId) {
-    if (taskId == null) {
-      // Abort everything
-      for (const [idx, s] of slots) {
-        s.abort.abort()
-        finishSlot(idx, 'aborted')
+  function abort(workerId) {
+    // Abort by workerId (from meta)
+    for (const [idx, entry] of slots) {
+      if (entry.meta?.workerId === workerId || entry.workerId === workerId) {
+        if (entry.abort) entry.abort.aborted = true
+        finishSlot(idx, entry, 'aborted')
+        return true
       }
-      pending.length = 0
-      EventBus.emit('scheduler.aborted', { all: true })
+    }
+    // Also remove from pending
+    const pi = pending.findIndex(t => t.meta?.workerId === workerId || t.workerId === workerId)
+    if (pi >= 0) {
+      pending.splice(pi, 1)
+      _save()
       return true
     }
-    // Abort specific task
-    for (const [idx, s] of slots) {
-      if (s.id === taskId) {
-        s.abort.abort()
-        finishSlot(idx, 'aborted')
-        return true
-      }
-    }
-    // Remove from pending
-    const pi = pending.findIndex(t => t.id === taskId)
-    if (pi >= 0) { pending.splice(pi, 1); return true }
     return false
   }
 
-  // --- Status ---
+  // ═══════════════════════════════════════════════════════════════
+  // State queries
+  // ═══════════════════════════════════════════════════════════════
 
   function getState() {
-    const running = []
-    for (const [idx, s] of slots) {
-      running.push({ id: s.id, slot: idx, task: s.task, priority: s.priority, status: s.status })
-    }
     return {
-      running,
-      pending: pending.map(t => ({ id: t.id, task: t.task, priority: t.priority, dependsOn: t.dependsOn })),
-      completed: completed.slice(-5).map(t => ({ id: t.id, task: t.task, status: t.status })),
-      freeSlots: MAX_SLOTS - slots.size,
+      pending: pending.map(t => ({ id: t.id, task: t.task, priority: t.priority, status: t.status })),
+      slots: Array.from(slots.entries()).map(([idx, s]) => ({ slot: idx, id: s.id, task: s.task, priority: s.priority, status: s.status })),
+      completed: completed.slice(-10),
     }
   }
 
@@ -192,44 +262,5 @@ const Scheduler = (() => {
     return slots.size === 0 && pending.length === 0
   }
 
-  // --- Persistence ---
-  async function save() {
-    if (!_store) return
-    await _store.set('scheduler', {
-      nextTaskId,
-      pending: pending.map(t => ({ id: t.id, task: t.task, steps: t.steps, priority: t.priority, dependsOn: t.dependsOn, status: t.status, retryCount: t.retryCount || 0 })),
-      completed: completed.slice(-10).map(t => ({ id: t.id, task: t.task, status: t.status })),
-    })
-  }
-
-  async function restore(store) {
-    _store = store
-    if (!_store) return false
-    const data = await _store.get('scheduler')
-    if (!data) return false
-    nextTaskId = data.nextTaskId || 1
-    if (data.completed) completed.push(...data.completed)
-    // Re-enqueue pending tasks that were interrupted
-    if (data.pending) {
-      for (const t of data.pending) {
-        if (t.status === 'pending' || t.status === 'running') {
-          t.status = 'pending'
-          pending.push(t)
-        }
-      }
-      if (pending.length > 0) {
-        console.log(`[Scheduler] Restored ${pending.length} pending tasks`)
-        schedule()
-      }
-    }
-    return true
-  }
-
-  // Auto-save on state changes
-  EventBus.on('scheduler.enqueued', () => save())
-  EventBus.on('scheduler.finished', () => save())
-  EventBus.on('scheduler.retry', () => save())
-
-  // _onStart is set by agent.js to provide the actual worker execution
-  return { enqueue, steer, abort, getState, isIdle, schedule, save, restore, _onStart: null, MAX_SLOTS }
+  return { enqueue, steer, abort, getState, isIdle, schedule, _onStart: null, _restore, MAX_SLOTS }
 })()
