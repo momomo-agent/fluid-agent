@@ -68,6 +68,8 @@ const Agent = (() => {
     container.appendChild(sep)
     restored.slice(-10).forEach(m => {
       if (m.role === 'user' || m.role === 'assistant') {
+        // Skip empty assistant messages (failed requests saved as loading state)
+        if (m.role === 'assistant' && !m.content?.trim()) return
         const text = m.role === 'assistant' ? (cleanReply(m.content || '') || '✅') : (m.content?.slice(0, 500) || '')
         addBubble(m.role === 'assistant' ? 'agent' : 'user', text)
       }
@@ -542,8 +544,11 @@ const Agent = (() => {
         bubble.textContent = fullReply
       }
 
-      messages.push({ role: 'assistant', content: fullReply })
-      saveChat()
+      // Only save non-empty replies (avoid persisting failed/loading states)
+      if (fullReply) {
+        messages.push({ role: 'assistant', content: fullReply })
+        saveChat()
+      }
 
       // If already dispatched during streaming, just update bubble text
       if (_streamDispatched) {
@@ -1363,8 +1368,10 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
         bubble.textContent = fullReply
       }
 
-      messages.push({ role: 'assistant', content: fullReply })
-      saveChat()
+      if (fullReply) {
+        messages.push({ role: 'assistant', content: fullReply })
+        saveChat()
+      }
 
       // Parse action but don't dispatch
       const actions = parseAction(fullReply)
@@ -1415,8 +1422,10 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
       // Final render: clean any leaked JSON
       renderBubbleContent(bubble, cleanReply(fullReply) || summary || `Done: ${taskDesc}`)
 
-      messages.push({ role: 'assistant', content: fullReply })
-      saveChat()
+      if (fullReply) {
+        messages.push({ role: 'assistant', content: fullReply })
+        saveChat()
+      }
 
       // Speak if voice enabled
       if (Voice?.isEnabled() && !Voice.isListening()) Voice.speak(fullReply)
