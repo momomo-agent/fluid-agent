@@ -226,7 +226,7 @@
         case 'back': ctx.EventBus.emit('browser.control', { action: 'back' }); break
         default: return { error: `Unknown browser action: ${action}` }
       }
-      return { success: true }
+      return { success: true, warning: 'Browser iframe cannot load external websites due to CORS. Use web_search/web_fetch tools for actual web content retrieval.' }
     }
   })
 
