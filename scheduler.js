@@ -147,7 +147,7 @@ const Scheduler = (() => {
   }
 
   function startInSlot(slotIndex, entry) {
-    const abortController = { aborted: false }
+    const abortController = new AbortController()
     entry.status = 'running'
     entry.abort = abortController
     entry.schedulerSlot = slotIndex
@@ -166,7 +166,7 @@ const Scheduler = (() => {
       })
         .then(result => finishSlot(slotIndex, entry, 'done', result))
         .catch(err => {
-          if (abortController.aborted) {
+          if (abortController.signal.aborted) {
             finishSlot(slotIndex, entry, 'aborted')
           } else {
             retryOrFail(slotIndex, entry, err)
@@ -203,7 +203,7 @@ const Scheduler = (() => {
   function pauseSlot(slotIndex) {
     const entry = slots.get(slotIndex)
     if (!entry) return
-    if (entry.abort) entry.abort.aborted = true
+    if (entry.abort) entry.abort.abort()
     slots.delete(slotIndex)
     entry.status = 'pending'
     entry.priority = 2
@@ -231,7 +231,7 @@ const Scheduler = (() => {
     // Abort by workerId (from meta)
     for (const [idx, entry] of slots) {
       if (entry.meta?.workerId === workerId || entry.workerId === workerId) {
-        if (entry.abort) entry.abort.aborted = true
+        if (entry.abort) entry.abort.abort()
         finishSlot(idx, entry, 'aborted')
         return true
       }

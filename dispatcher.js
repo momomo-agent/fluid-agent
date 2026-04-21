@@ -16,6 +16,8 @@ const Dispatcher = (() => {
   const STALL_THRESHOLD = 5
 
   let _nextWorkerId = 1
+  let _pendingDeps = new Map()  // intentId → intent (waiting for dependencies)
+  let _dispatchMode = 'code'   // 'code' | 'llm'
 
   // ═══════════════════════════════════════════════════════════════
   // VFS persistence — /proc/workers/{id}.json
@@ -147,17 +149,29 @@ const Dispatcher = (() => {
   // ═══════════════════════════════════════════════════════════════
 
   function _handleIntentChange(action, intent) {
-    console.log(`[Dispatcher] Intent ${action}: ${intent.id} "${intent.goal.slice(0, 60)}"`)
+    console.log(`[Dispatcher] Intent ${action}: ${intent.id} "${intent.goal.slice(0, 60)}"${_dispatchMode === 'llm' ? ' [LLM mode]' : ''}`)
+
+    // LLM mode: delegate scheduling decisions to LLM
+    if (_dispatchMode === 'llm' && (action === 'create' || action === 'update')) {
+      _handleIntentLLM(action, intent)
+      return
+    }
 
     switch (action) {
       case 'create': {
-        IntentState.running(intent.id)
-        const workerId = _nextWorkerId++
-        _intentWorker.set(intent.id, workerId)
-        _workerIntent.set(workerId, intent.id)
-        _saveMeta()
-        EventBus.emit('dispatcher.spawn', { intentId: intent.id, workerId, task: intent.goal })
-        Scheduler.enqueue(intent.goal, [], 1, [], { intentId: intent.id, workerId })
+        // Check dependencies
+        if (intent.dependsOn && intent.dependsOn.length > 0) {
+          const unmet = intent.dependsOn.filter(depId => {
+            const dep = IntentState.get(depId)
+            return !dep || dep.status !== 'done'
+          })
+          if (unmet.length > 0) {
+            _pendingDeps.set(intent.id, intent)
+            console.log(`[Dispatcher] Intent ${intent.id} waiting on: ${unmet.join(', ')}`)
+            return
+          }
+        }
+        _spawnWorkerForIntent(intent)
         break
       }
 
@@ -202,10 +216,124 @@ const Dispatcher = (() => {
         break
 
       case 'done':
-      case 'failed':
+      case 'failed': {
+        // Check if any pending intents can now proceed
+        _checkPendingDeps()
         break
+      }
     }
   }
+
+  // Spawn a worker for an intent (extracted for reuse)
+  function _spawnWorkerForIntent(intent) {
+    IntentState.running(intent.id)
+    const workerId = _nextWorkerId++
+    _intentWorker.set(intent.id, workerId)
+    _workerIntent.set(workerId, intent.id)
+    _saveMeta()
+
+    // Inject dependency artifacts into goal context
+    let enrichedGoal = intent.goal
+    if (intent.dependsOn && intent.dependsOn.length > 0) {
+      const depContext = intent.dependsOn.map(depId => {
+        const dep = IntentState.get(depId)
+        if (!dep) return null
+        let ctx = `[${depId}] "${dep.goal}" → ${dep.status}`
+        if (dep.result?.summary) ctx += `: ${dep.result.summary.slice(0, 200)}`
+        if (dep.artifacts?.length > 0) ctx += ` | artifacts: ${dep.artifacts.join(', ')}`
+        return ctx
+      }).filter(Boolean)
+      if (depContext.length > 0) {
+        enrichedGoal += `\n\nDependency results:\n${depContext.join('\n')}`
+      }
+    }
+
+    EventBus.emit('dispatcher.spawn', { intentId: intent.id, workerId, task: enrichedGoal })
+    Scheduler.enqueue(enrichedGoal, [], 1, [], { intentId: intent.id, workerId })
+  }
+
+  // Check pending intents whose dependencies may now be satisfied
+  function _checkPendingDeps() {
+    for (const [intentId, intent] of _pendingDeps) {
+      const unmet = (intent.dependsOn || []).filter(depId => {
+        const dep = IntentState.get(depId)
+        return !dep || dep.status !== 'done'
+      })
+      // If any dependency failed, fail this intent too
+      const failed = (intent.dependsOn || []).filter(depId => {
+        const dep = IntentState.get(depId)
+        return dep && dep.status === 'failed'
+      })
+      if (failed.length > 0) {
+        _pendingDeps.delete(intentId)
+        IntentState.fail(intentId, `Dependency failed: ${failed.join(', ')}`)
+        continue
+      }
+      if (unmet.length === 0) {
+        _pendingDeps.delete(intentId)
+        console.log(`[Dispatcher] Dependencies met for ${intentId}, spawning worker`)
+        _spawnWorkerForIntent(IntentState.get(intentId) || intent)
+      }
+    }
+  }
+
+  // LLM-based dispatch (experimental)
+  async function _handleIntentLLM(action, intent) {
+    if (!_ai) {
+      console.warn('[Dispatcher] LLM mode but no AI instance, falling back to code mode')
+      _dispatchMode = 'code'
+      _handleIntentChange(action, intent)
+      return
+    }
+    const allIntents = IntentState.all()
+    const workers = Array.from(_workers.values()).filter(w => w.status === 'running' || w.status === 'suspended')
+    const prompt = `You are a task dispatcher. Given the current state, decide what to do.
+
+Event: ${action} intent ${intent.id} "${intent.goal}"
+
+All intents:\n${allIntents.map(i => `- ${i.id}: "${i.goal}" (${i.status})${i.dependsOn?.length ? ' depends:' + i.dependsOn.join(',') : ''}`).join('\n')}
+
+Active workers:\n${workers.map(w => `- Worker #${w.id}: "${w.task.slice(0, 60)}" (turn ${w.turnCount})`).join('\n') || 'none'}
+
+Free slots: ${Scheduler.MAX_SLOTS - workers.length}
+
+Respond with JSON: {"ops": [{"type": "spawn"|"steer"|"cancel"|"wait", "intentId": "...", "reason": "..."}]}`
+
+    try {
+      const resp = await _ai.chat([{ role: 'user', content: prompt }], { max_tokens: 300 })
+      const text = resp?.content?.[0]?.text || resp?.text || ''
+      const match = text.match(/\{[\s\S]*\}/)
+      if (match) {
+        const decision = JSON.parse(match[0])
+        for (const op of (decision.ops || [])) {
+          console.log(`[Dispatcher LLM] ${op.type} ${op.intentId}: ${op.reason || ''}`)
+          if (op.type === 'spawn') {
+            const target = IntentState.get(op.intentId)
+            if (target && target.status === 'active') _spawnWorkerForIntent(target)
+          } else if (op.type === 'cancel') {
+            IntentState.cancel(op.intentId)
+          } else if (op.type === 'steer' && op.instruction) {
+            const wId = _intentWorker.get(op.intentId)
+            if (wId) Scheduler.steer(null, op.instruction)
+          }
+          // 'wait' = do nothing, dependency not met
+        }
+      }
+    } catch (e) {
+      console.error('[Dispatcher] LLM dispatch failed, falling back to code:', e.message)
+      _dispatchMode = 'code'
+      _handleIntentChange(action, intent)
+    }
+  }
+
+  function setDispatchMode(mode) {
+    if (mode === 'code' || mode === 'llm') {
+      _dispatchMode = mode
+      console.log(`[Dispatcher] Mode → ${mode}`)
+    }
+  }
+
+  function getDispatchMode() { return _dispatchMode }
 
   // ═══════════════════════════════════════════════════════════════
   // Worker lifecycle
@@ -287,6 +415,15 @@ const Dispatcher = (() => {
 
     // Save state to VFS after every turn
     _saveWorker(workerId)
+
+    // Push progress + artifacts back to intent
+    const intentId = _workerIntent.get(workerId)
+    if (intentId) {
+      const changes = {}
+      if (turnResult?.progress) changes.progress = turnResult.progress
+      if (turnResult?.artifacts && turnResult.artifacts.length > 0) changes.artifacts = turnResult.artifacts
+      if (changes.progress || changes.artifacts) IntentState.update(intentId, changes)
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -422,6 +559,7 @@ const Dispatcher = (() => {
     checkForResume, resumeWorker,
     workerCompleted, workerFailed, onResultsReady,
     getStateSummary, getState, formatForTalker, gc,
+    setDispatchMode, getDispatchMode,
     get decisionLog() { return _decisionLog },
   }
 })()

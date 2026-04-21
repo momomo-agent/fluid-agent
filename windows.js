@@ -972,8 +972,9 @@ ${css}
     const selected = taskHistory.find(t => t.id === sel) || taskHistory[0]
 
     // Queue overview from Dispatcher + Scheduler
-    const ds = typeof Dispatcher !== 'undefined' ? Dispatcher.getState() : { running: [], pending: [] }
-    const ss = typeof Scheduler !== 'undefined' ? Scheduler.getState() : { running: [], pending: [], completed: [], freeSlots: 3 }
+    const _ds = typeof Dispatcher !== 'undefined' ? Dispatcher.getState() : { workers: [] }
+    const ds = { running: _ds.workers?.filter(w => w.status === 'running') || [], pending: _ds.workers?.filter(w => w.status === 'suspended' || w.status === 'pending') || [] }
+    const ss = typeof Scheduler !== 'undefined' ? Scheduler.getState() : { slots: [], pending: [], completed: [] }
 
     // Intent state
     const intents = typeof IntentState !== 'undefined' ? IntentState.all() : []
@@ -982,7 +983,7 @@ ${css}
     body.innerHTML = `<div class="tm-layout">
       <div class="tm-tabs">
         <button class="tm-tab ${currentView === 'detail' ? 'active' : ''}" data-view="detail">Tasks</button>
-        <button class="tm-tab ${currentView === 'log' ? 'active' : ''}" data-view="log">Log${selected?.log.length ? ` · ${selected.log.length}` : ''}</button>
+        <button class="tm-tab ${currentView === 'log' ? 'active' : ''}" data-view="log">Log${selected?.log?.length ? ` · ${selected.log.length}` : ''}</button>
         <button class="tm-tab ${currentView === 'queue' ? 'active' : ''}" data-view="queue">Queue${ds.running.length + ds.pending.length + ss.pending.length > 0 ? ` · ${ds.running.length + ds.pending.length + ss.pending.length}` : ''}</button>
         <button class="tm-tab ${currentView === 'intents' ? 'active' : ''}" data-view="intents">Intents${activeIntents.length ? ` · ${activeIntents.length}` : ''}</button>
       </div>
@@ -1013,7 +1014,7 @@ ${css}
       </div>` : currentView === 'log' ? `
       <div class="tm-log-view">
         <div class="tm-log-header">${selected ? selected.goal.slice(0, 50) : 'No task selected'}</div>
-        <div class="tm-log-body">${selected?.log.length ? selected.log.map((l, i) => `<div class="tm-log-entry"><span class="tm-log-idx">${i + 1}</span><span class="tm-log-text">${l}</span></div>`).join('') : '<div class="tm-empty">No logs yet</div>'}</div>
+        <div class="tm-log-body">${selected?.log?.length ? selected.log.map((l, i) => `<div class="tm-log-entry"><span class="tm-log-idx">${i + 1}</span><span class="tm-log-text">${l}</span></div>`).join('') : '<div class="tm-empty">No logs yet</div>'}</div>
       </div>` : `
       <div class="tm-content"><div class="tm-list">${ss.pending.length ? ss.pending.map(t => `
         <div class="tm-item pending" data-id="pending-${t.id}">

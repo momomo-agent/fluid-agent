@@ -420,7 +420,7 @@ const Agent = (() => {
     if (parsed.intents && Array.isArray(parsed.intents)) {
       for (const i of parsed.intents) {
         if (i.action === 'create') {
-          IntentState.create(i.goal)
+          IntentState.create(i.goal, { dependsOn: i.dependsOn || [] })
           showActivity(`\ud83d\udccb New: ${i.goal.slice(0, 40)}`)
         } else if (i.action === 'update' && i.id) {
           IntentState.update(i.id, { goal: i.goal, message: i.message || i.context })
@@ -670,6 +670,12 @@ Your job is to understand what the user wants and express it as intents. You do 
 {"reply": "your reply", "intents": [{"action": "create", "goal": "clear description of what to achieve"}]}
 \`\`\`
 
+**CREATE with dependencies** — new intent that needs results from other intents:
+\`\`\`json
+{"reply": "your reply", "intents": [{"action": "create", "goal": "combine results into a report", "dependsOn": ["intent-1", "intent-2"]}]}
+\`\`\`
+The worker won't start until all dependencies are done. Their artifacts and results will be injected automatically.
+
 **UPDATE** — user refines, adds to, or changes an existing intent:
 \`\`\`json
 {"reply": "your reply", "intents": [{"action": "update", "id": "intent-1", "goal": "re-summarized complete goal", "message": "the user's exact words"}]}
@@ -691,7 +697,8 @@ IMPORTANT: Always include "message" (what the user said) AND re-summarize the fu
 1. Check Active Intents above. If the user's message relates to an existing intent, UPDATE it — don't create a duplicate.
 2. Write clear, complete goals. "播放一下" is bad. "播放刚才找到的周杰伦的歌" is good.
 3. Multiple independent goals = multiple create intents in one block.
-4. Sequential goals (B depends on A) = one intent with a combined goal.
+4. Sequential goals (B depends on A) = create B with dependsOn: ["intent-A"]. Fan-in (C needs A+B) = create C with dependsOn: ["intent-A", "intent-B"]. Only use dependsOn when the new intent truly needs the other's output. If it's just a refinement of an existing intent, UPDATE instead.
+5. Use Progress/Artifacts to make smart decisions: if an intent shows progress, factor that into your response. "搜到的整理成报告" + intent shows "Used web_search" → UPDATE the intent to include report generation. If an intent is done with artifacts, reference those artifacts in new intents.
 5. BIAS TOWARD ACTION: If the user's request could be fulfilled by using tools (search, fetch, show, play, create), create an intent. Only skip intents for pure opinions, philosophical questions, or casual chat. When in doubt, create an intent — it's better to act than to ask clarifying questions.
 6. DON'T ASK, DO: If information is missing (e.g. location, file name), make reasonable assumptions and act. "附近有什么好吃的" → search for food recommendations. "这个文件里有什么" → list files and show. Never say "I can't do X" — find a creative way to fulfill the request with available tools.
 7. NO TOOL ≠ NO ACTION: If no dedicated tool exists for a request, use general tools creatively. No calendar? → Create a schedule app or search files. No translator? → You can translate directly. Always find a way.
@@ -717,7 +724,7 @@ Be natural, concise, and have personality.`
   // Scheduler calls this when a slot opens
   async function startWorker(taskDescription, plannedSteps, abort, opts = {}) {
     console.log(`[startWorker] called: "${taskDescription.slice(0, 60)}"${opts.resume ? ' (RESUME)' : ''}`)
-    const workerId = Dispatcher.nextWorkerId()
+    const workerId = opts.workerId || Dispatcher.nextWorkerId()
     Dispatcher.registerWorker(workerId, taskDescription, plannedSteps)
 
     try {
@@ -1001,6 +1008,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         workerMessages = turn.messages
 
         // --- Execute tool calls ---
+        let _turnArtifacts = []
         if (turn.toolCalls.length > 0) {
           const results = []
           const _toolsT0 = Date.now()
@@ -1013,6 +1021,12 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
             Capabilities.recordUse(tc.name)
             const result = handler ? await handler(tc.input) : { error: `Unknown tool: ${tc.name}` }
             results.push(result)
+            // Extract artifacts (window IDs, file paths)
+            const rs = typeof result === 'string' ? result : JSON.stringify(result || '')
+            const winMatch = rs.match(/"winId"\s*:\s*"(win-\d+)"/)
+            if (winMatch) _turnArtifacts.push(winMatch[1])
+            const pathMatch = rs.match(/\/home\/[^"\s]+/g)
+            if (pathMatch) _turnArtifacts.push(...pathMatch)
             WindowManager.updateTask(task)
 
             if (result?.done) {
@@ -1062,7 +1076,11 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
           toolCallCount: (Dispatcher.getWorker(workerId)?.toolCallCount || 0) + turn.toolCalls.length,
         })
 
-        const postDecision = await Dispatcher.afterTurn(workerId, turn)
+        const postDecision = await Dispatcher.afterTurn(workerId, {
+          ...turn,
+          progress: turn.text?.slice(0, 150) || (turn.toolCalls.length > 0 ? `Used ${turn.toolCalls.map(tc => tc.name).join(', ')}` : ''),
+          artifacts: _turnArtifacts,
+        })
         if (postDecision?.action === 'abort') throw new Error('aborted')
         if (postDecision?.action === 'steer' && postDecision.instruction) {
           workerMessages.push({ role: 'user', content: `[DIRECTION CHANGE] ${postDecision.instruction}` })

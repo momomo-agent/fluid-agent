@@ -34,13 +34,16 @@ const IntentState = (() => {
 
   // --- Intent CRUD ---
 
-  function create(goal) {
+  function create(goal, opts = {}) {
     const id = `intent-${_nextId++}`
     const intent = {
       id,
       goal,
       status: 'active',
+      progress: '',
+      artifacts: [],
       messages: [],
+      dependsOn: opts.dependsOn || [],  // array of intent IDs this depends on
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
@@ -60,6 +63,13 @@ const IntentState = (() => {
       if (!intent.goalHistory) intent.goalHistory = []
       intent.goalHistory.push({ goal: intent.goal, at: Date.now() })
       intent.goal = changes.goal
+    }
+    if (changes.progress != null) intent.progress = changes.progress
+    if (changes.artifacts) {
+      if (!intent.artifacts) intent.artifacts = []
+      for (const a of changes.artifacts) {
+        if (!intent.artifacts.includes(a)) intent.artifacts.push(a)
+      }
     }
     intent.updatedAt = Date.now()
     _save()
@@ -92,6 +102,7 @@ const IntentState = (() => {
     if (!intent) return null
     intent.status = 'done'
     if (result) intent.result = result
+    // Preserve progress/artifacts from worker turns
     intent.updatedAt = Date.now()
     _save()
     _notify('done', intent)
@@ -130,6 +141,9 @@ const IntentState = (() => {
       out += '\n## Active Intents\n'
       for (const i of actv) {
         out += `- [${i.id}] "${i.goal}" (${i.status})`
+        if (i.dependsOn && i.dependsOn.length > 0) out += ` [waiting on: ${i.dependsOn.join(', ')}]`
+        if (i.progress) out += `\n  Progress: ${i.progress}`
+        if (i.artifacts && i.artifacts.length > 0) out += `\n  Artifacts: ${i.artifacts.join(', ')}`
         if (i.messages.length > 0) {
           const recent = i.messages.slice(-3).map(m => `"${m.slice(0, 30)}"`).join(' → ')
           out += ` (history: ${recent})`
