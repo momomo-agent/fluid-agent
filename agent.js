@@ -754,8 +754,8 @@ Be natural, concise, and have personality.`
   }
 
   // Scheduler calls this when a slot opens
-  async function startWorker(taskDescription, plannedSteps, abort) {
-    console.log(`[startWorker] called: "${taskDescription.slice(0, 60)}"`)
+  async function startWorker(taskDescription, plannedSteps, abort, opts = {}) {
+    console.log(`[startWorker] called: "${taskDescription.slice(0, 60)}"${opts.resume ? ' (RESUME)' : ''}`)
     const workerId = Dispatcher.nextWorkerId()
     Dispatcher.registerWorker(workerId, taskDescription, plannedSteps)
 
@@ -920,6 +920,7 @@ More tools available — call search_tools({names: [...]}) to activate:
 ${extendedToolList}
 
 PREFER native apps over browser. Use music for music, map for locations, video for videos.
+IMPORTANT: The browser app uses an iframe and CANNOT load external websites (CORS/cross-origin blocks). For web searches, use web_search/web_fetch tools instead. The browser app is only useful for displaying local content.
 To play music: search_tools({names:["search_music","music"]}) → search_music({query}) → music({action:"add_and_play",...}).
 Once loaded, tools stay available for the rest of this task.
 
@@ -980,8 +981,8 @@ IMPORTANT: If no planned steps are listed above, call plan_steps FIRST to set yo
 Do NOT call update_progress separately — progress is tracked automatically. Focus on executing tools efficiently: batch multiple tool calls in a single turn when possible.
 When finished, call the done tool with a summary. Set summary to "silent" if the action itself IS the result (e.g. playing music, changing wallpaper, opening an app). Only write a detailed summary when there are findings or information the user needs to read.`
 
-    let workerMessages = [{ role: 'user', content: taskDescription }]
-    let turnCount = 0
+    let workerMessages = opts.resumeMessages || [{ role: 'user', content: taskDescription }]
+    let turnCount = opts.resumeTurn || 0
     const MAX_TURNS = 50
     let workerDone = false
     console.log(`[Worker #${workerId}] Starting turn loop for: "${taskDescription.slice(0, 60)}"`)
@@ -1451,5 +1452,23 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
     entry.steps, abort
   )
 
-  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getScheduler: () => Scheduler, renderBubbleContent, _messages: messages, getSkills: () => Array.from(customSkills.entries()).map(([name, s]) => ({ name, icon: s.icon, description: s.description })), deleteSkill: (name) => { customSkills.delete(name); VFS.rm(`/system/skills/${name}`, true) }, getTaskHistory: () => WindowManager.getTaskHistory?.() || [] }
+  // Resume an unfinished task from checkpoint
+  async function resumeTask(workerId) {
+    const checkpoint = await Dispatcher.resumeWorker(workerId)
+    if (!checkpoint) {
+      console.warn('[resumeTask] No checkpoint found for', workerId)
+      return null
+    }
+    const task = checkpoint.task || ''
+    const steps = checkpoint.worker?.steps || []
+    const resumeMessages = checkpoint.worker?.messages || []
+    const resumeTurn = checkpoint.turnIndex || 0
+    console.log(`[resumeTask] Resuming "${task.slice(0, 60)}" from turn ${resumeTurn}`)
+    // Create a new abort controller and start the worker with resume context
+    const abort = new AbortController()
+    await startWorker(task, steps, abort, { resume: true, resumeMessages, resumeTurn })
+    return checkpoint
+  }
+
+  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getScheduler: () => Scheduler, renderBubbleContent, _messages: messages, getSkills: () => Array.from(customSkills.entries()).map(([name, s]) => ({ name, icon: s.icon, description: s.description })), deleteSkill: (name) => { customSkills.delete(name); VFS.rm(`/system/skills/${name}`, true) }, getTaskHistory: () => WindowManager.getTaskHistory?.() || [], resumeTask }
 })() 

@@ -61,8 +61,8 @@
           const bubble = document.createElement('div')
           bubble.className = 'chat-bubble agent'
           bubble.id = 'resume-prompt'
-          const _resumeTask = unfinished[0].task?.replace(/'/g, '').slice(0, 200) || ''
-          bubble.innerHTML = `<span style="opacity:0.7">📋 上次有未完成的任务：${names}</span><br><button onclick="document.getElementById('resume-prompt')?.remove();IntentState.create('${_resumeTask}')" style="margin-top:4px;padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(96,165,250,0.2);color:#60a5fa;cursor:pointer">继续</button> <button onclick="document.getElementById('resume-prompt')?.remove();CheckpointStore.markDone('${unfinished[0].worker_id}','dismissed')" style="margin-top:4px;padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:transparent;color:rgba(255,255,255,0.5);cursor:pointer">忽略</button>`
+          const _resumeWid = unfinished[0].worker_id
+          bubble.innerHTML = `<span style="opacity:0.7">📋 上次有未完成的任务：${names}</span><br><button onclick="document.getElementById('resume-prompt')?.remove();Agent.resumeTask('${_resumeWid}')" style="margin-top:4px;padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(96,165,250,0.2);color:#60a5fa;cursor:pointer">继续</button> <button onclick="document.getElementById('resume-prompt')?.remove();CheckpointStore.markDone('${_resumeWid}','dismissed')" style="margin-top:4px;padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:transparent;color:rgba(255,255,255,0.5);cursor:pointer">忽略</button>`
           document.getElementById('chat-messages')?.appendChild(bubble)
         }, 500)
       }
