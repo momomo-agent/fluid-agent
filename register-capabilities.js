@@ -259,6 +259,7 @@
     description: 'Search the web using Tavily for real-world facts and current events',
     icon: '🔍',
     category: 'Web',
+    alwaysAvailable: true,
     schema: { type: 'object', properties: { query: { type: 'string' }, search_depth: { type: 'string', enum: ['basic', 'advanced'] } }, required: ['query'] },
     handler: async ({ query, search_depth }, ctx) => {
       ctx.showActivity(`🔍 Searching: ${query.slice(0, 40)}...`)
@@ -275,6 +276,7 @@
 
   Capabilities.register('web_fetch', {
     description: 'Fetch and read web page content from a URL',
+    alwaysAvailable: true,
     icon: '📄',
     category: 'Web',
     schema: { type: 'object', properties: { url: { type: 'string' }, max_chars: { type: 'number' } }, required: ['url'] },
