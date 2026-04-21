@@ -297,17 +297,12 @@ const Dispatcher = (() => {
     // "silent" means the action itself is the result (e.g. playing music) — mark reported immediately
     const silent = summary === 'silent'
     IntentState.done(intentId, { summary, log: log.slice(-10) })
-    if (silent) IntentState.markReported(intentId)
-
-    // Check if all active intents are settled
-    const stillActive = IntentState.active().length > 0
-    if (!stillActive && _onResultsReady) {
-      // Only notify Talker if there are unreported results
-      const unreported = IntentState.all().filter(i => (i.status === 'done' || i.status === 'failed') && !i._reported)
-      if (unreported.length > 0) {
-        console.log('[Dispatcher] All intents settled, notifying Talker')
-        _onResultsReady()
-      }
+    if (silent) {
+      IntentState.markReported(intentId)
+    } else if (_onResultsReady) {
+      // Report each completed intent immediately
+      console.log(`[Dispatcher] Intent ${intentId} completed, notifying Talker`)
+      _onResultsReady()
     }
   }
 
@@ -317,9 +312,8 @@ const Dispatcher = (() => {
     console.log(`[Dispatcher] Worker #${workerId} failed → intent ${intentId}: ${error}`)
     IntentState.fail(intentId, error)
 
-    const stillActive = IntentState.active().length > 0
-    if (!stillActive && _onResultsReady) {
-      console.log('[Dispatcher] All intents settled (with failures), notifying Talker')
+    if (_onResultsReady) {
+      console.log(`[Dispatcher] Intent ${intentId} failed, notifying Talker`)
       _onResultsReady()
     }
   }
