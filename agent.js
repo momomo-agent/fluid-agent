@@ -68,7 +68,8 @@ const Agent = (() => {
     container.appendChild(sep)
     restored.slice(-10).forEach(m => {
       if (m.role === 'user' || m.role === 'assistant') {
-        addBubble(m.role === 'assistant' ? 'agent' : 'user', m.role === 'assistant' ? cleanReply(m.content || '') : (m.content?.slice(0, 500) || ''))
+        const text = m.role === 'assistant' ? (cleanReply(m.content || '') || '✅') : (m.content?.slice(0, 500) || '')
+        addBubble(m.role === 'assistant' ? 'agent' : 'user', text)
       }
     })
   } // pending tasks
