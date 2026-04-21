@@ -78,6 +78,11 @@
       ctx.blackboard.currentTask.status = 'done'
       ctx.steps.forEach(s => { if (s.status !== 'done' && s.status !== 'error') s.status = 'done' })
       ctx.WindowManager.updateTask(ctx.task)
+      // Mark the corresponding intent as done
+      if (typeof IntentState !== 'undefined') {
+        const active = IntentState.active()
+        if (active.length > 0) IntentState.done(active[0].id)
+      }
       return { done: true, summary }
     }
   })
