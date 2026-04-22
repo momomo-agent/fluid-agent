@@ -393,11 +393,14 @@ Respond with JSON: {"ops": [{"type": "spawn"|"steer"|"cancel"|"wait", "intentId"
 
   function afterTurn(workerId, turnResult) {
     const w = _workers.get(workerId)
-    if (!w) return
+    if (!w) return { action: 'continue' }
 
     // Track tokens
-    if (turnResult?.usage) {
-      w.totalTokens = (w.totalTokens || 0) + (turnResult.usage.input_tokens || 0) + (turnResult.usage.output_tokens || 0)
+    const turnTokens = turnResult?.usage
+      ? (turnResult.usage.input_tokens || 0) + (turnResult.usage.output_tokens || 0)
+      : 0
+    if (turnTokens) {
+      w.totalTokens = (w.totalTokens || 0) + turnTokens
     }
     if (turnResult?.toolCalls) {
       w.toolCallCount = (w.toolCallCount || 0) + turnResult.toolCalls.length
@@ -424,6 +427,15 @@ Respond with JSON: {"ops": [{"type": "spawn"|"steer"|"cancel"|"wait", "intentId"
       if (turnResult?.artifacts && turnResult.artifacts.length > 0) changes.artifacts = turnResult.artifacts
       if (changes.progress || changes.artifacts) IntentState.update(intentId, changes)
     }
+
+    // Consult Scheduler for turn-level scheduling decision
+    const schedulerDecision = Scheduler.turnCompleted(workerId, { tokens: turnTokens })
+    if (schedulerDecision.action === 'suspend') {
+      console.log(`[Dispatcher] Scheduler says suspend worker #${workerId}: ${schedulerDecision.reason}`)
+      return { action: 'suspend', reason: schedulerDecision.reason }
+    }
+
+    return { action: 'continue' }
   }
 
   // ═══════════════════════════════════════════════════════════════

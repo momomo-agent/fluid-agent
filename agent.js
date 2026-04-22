@@ -1082,6 +1082,13 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
           artifacts: _turnArtifacts,
         })
         if (postDecision?.action === 'abort') throw new Error('aborted')
+        if (postDecision?.action === 'suspend') {
+          console.log(`[Worker #${workerId}] Suspended by Scheduler: ${postDecision.reason}`)
+          task.log.push(`⏸ Suspended: ${postDecision.reason}`)
+          setWorkerStatus(`⏸ Suspended: ${postDecision.reason?.slice(0, 30)}`)
+          Dispatcher.updateWorker(workerId, { status: 'suspended', suspendedAt: Date.now() })
+          return
+        }
         if (postDecision?.action === 'steer' && postDecision.instruction) {
           workerMessages.push({ role: 'user', content: `[DIRECTION CHANGE] ${postDecision.instruction}` })
           task.log.push(`↪ Steered: ${postDecision.instruction}`)

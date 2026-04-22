@@ -1,11 +1,14 @@
-/* scheduler.js — Task scheduler with parallel slots, retry, and VFS persistence */
+/* scheduler.js — Task scheduler with parallel slots, turn-aware scheduling, and VFS persistence */
 const Scheduler = (() => {
   const MAX_SLOTS = 3
   const MAX_RETRIES = 2
   const RETRY_BASE_MS = 1000
+  const MAX_TURN_BUDGET = 30       // max turns per slot before forced suspend
+  const MAX_TOKEN_BUDGET = 200000  // max tokens per slot before forced suspend
+  const TURN_QUANTUM = 10          // turns per time slice for round-robin
   let nextTaskId = 1
   const pending = []       // { id, task, steps, priority, dependsOn, status:'pending', retryCount:0 }
-  const slots = new Map()  // slotIndex → { id, task, steps, priority, abort, status:'running' }
+  const slots = new Map()  // slotIndex → { id, task, steps, priority, abort, status:'running', turnCount, totalTokens }
   const completed = []     // last N completed tasks
 
   const PROC_DIR = '/proc/scheduler'
@@ -151,6 +154,8 @@ const Scheduler = (() => {
     entry.status = 'running'
     entry.abort = abortController
     entry.schedulerSlot = slotIndex
+    entry.turnCount = entry.turnCount || 0
+    entry.totalTokens = entry.totalTokens || 0
     slots.set(slotIndex, entry)
     _save()
 
@@ -213,6 +218,73 @@ const Scheduler = (() => {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // Turn-aware scheduling
+  // ═══════════════════════════════════════════════════════════════
+
+  // Called by Dispatcher after each worker turn. Returns scheduling decision.
+  function turnCompleted(workerId, turnInfo = {}) {
+    // Find the slot running this worker
+    let slotIndex = null, entry = null
+    for (const [idx, s] of slots) {
+      if (s.meta?.workerId === workerId || s.workerId === workerId) {
+        slotIndex = idx
+        entry = s
+        break
+      }
+    }
+    if (!entry) return { action: 'continue' }
+
+    // Update turn stats
+    entry.turnCount = (entry.turnCount || 0) + 1
+    entry.totalTokens = (entry.totalTokens || 0) + (turnInfo.tokens || 0)
+    _save()
+
+    // --- Budget checks ---
+
+    // Token budget exceeded
+    if (entry.totalTokens >= MAX_TOKEN_BUDGET) {
+      console.log(`[Scheduler] Slot ${slotIndex}: token budget exceeded (${entry.totalTokens}/${MAX_TOKEN_BUDGET})`)
+      EventBus.emit('scheduler.budget', { id: entry.id, type: 'tokens', used: entry.totalTokens, limit: MAX_TOKEN_BUDGET })
+      return { action: 'suspend', reason: `Token budget exceeded (${entry.totalTokens})` }
+    }
+
+    // Turn budget exceeded
+    if (entry.turnCount >= MAX_TURN_BUDGET) {
+      console.log(`[Scheduler] Slot ${slotIndex}: turn budget exceeded (${entry.turnCount}/${MAX_TURN_BUDGET})`)
+      EventBus.emit('scheduler.budget', { id: entry.id, type: 'turns', used: entry.turnCount, limit: MAX_TURN_BUDGET })
+      return { action: 'suspend', reason: `Turn budget exceeded (${entry.turnCount})` }
+    }
+
+    // --- Preemption check ---
+    // If there's a higher-priority task waiting and we've used our quantum
+    const hasHigherPriority = pending.some(t => t.status === 'pending' && t.priority < entry.priority)
+    if (hasHigherPriority && entry.turnCount >= TURN_QUANTUM) {
+      console.log(`[Scheduler] Slot ${slotIndex}: preempting for higher priority task (turn ${entry.turnCount})`)
+      return { action: 'suspend', reason: 'Higher priority task waiting' }
+    }
+
+    // --- Fair scheduling (round-robin) ---
+    // If other tasks are waiting and we've used our quantum, yield
+    const waitingCount = pending.filter(t => t.status === 'pending').length
+    if (waitingCount > 0 && entry.turnCount > 0 && entry.turnCount % TURN_QUANTUM === 0) {
+      console.log(`[Scheduler] Slot ${slotIndex}: quantum expired (${TURN_QUANTUM} turns), yielding for fairness`)
+      return { action: 'suspend', reason: `Quantum expired (${TURN_QUANTUM} turns)` }
+    }
+
+    return { action: 'continue' }
+  }
+
+  // Get turn stats for a slot by workerId
+  function getSlotStats(workerId) {
+    for (const [idx, s] of slots) {
+      if (s.meta?.workerId === workerId || s.workerId === workerId) {
+        return { slotIndex: idx, turnCount: s.turnCount || 0, totalTokens: s.totalTokens || 0, priority: s.priority }
+      }
+    }
+    return null
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // Steer / Abort
   // ═══════════════════════════════════════════════════════════════
 
@@ -262,5 +334,10 @@ const Scheduler = (() => {
     return slots.size === 0 && pending.length === 0
   }
 
-  return { enqueue, steer, abort, getState, isIdle, schedule, _onStart: null, _restore, MAX_SLOTS }
+  return {
+    enqueue, steer, abort, getState, isIdle, schedule,
+    turnCompleted, getSlotStats,
+    _onStart: null, _restore, MAX_SLOTS,
+    MAX_TURN_BUDGET, MAX_TOKEN_BUDGET, TURN_QUANTUM,
+  }
 })()

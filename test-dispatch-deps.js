@@ -126,6 +126,7 @@ const mockAI = {
 }
 
 Dispatcher.init(mockAI)
+Dispatcher.setDispatchMode('code')  // Tests assume code mode unless explicitly testing LLM
 
 console.log('\n═══════════════════════════════════════════════════')
 console.log('  Test Suite: Intent Dependencies + Dispatch Modes')
