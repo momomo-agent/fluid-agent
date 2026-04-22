@@ -1416,7 +1416,7 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
 
     // Conductor provides intent context for reporting
     // We trigger a Talker turn with a system nudge
-    const intentContext = _conductor._intentState.formatForTalker()
+    const intentContext = _conductor._intentState.formatForTalker({ includeSettled: true })
     if (!intentContext.trim()) return
 
     // Collect settled intent IDs to mark as reported after
