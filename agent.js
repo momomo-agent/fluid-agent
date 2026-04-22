@@ -1293,33 +1293,12 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
           }
         }
 
-        // Step 3: If multiple execute intents, ask Dispatcher to plan dependencies
+        // Step 3: Enqueue execute intents independently
         const executeIntents = intents.filter(x => x.action.action === 'execute' || x.action.action === 'redirect')
-        if (executeIntents.length > 1 && typeof Dispatcher !== 'undefined' && Dispatcher.planBatch) {
-          const plan = await Dispatcher.planBatch(executeIntents.map(x => ({
-            index: x.index,
-            task: x.action.task || x.msg,
-            steps: x.action.steps || [],
-            priority: x.action.priority || 1,
-          })))
-
-          if (plan && plan.tasks) {
-            // Enqueue with dependency info
-            const idMap = {}  // plan index → scheduler task id
-            for (const pt of plan.tasks) {
-              const depIds = (pt.dependsOn || []).map(d => idMap[d]).filter(Boolean)
-              const id = Scheduler.enqueue(pt.task, pt.steps || [], pt.priority || 1, depIds)
-              idMap[pt.index] = id
-              const label = pt.priority === 0 ? '⚡' : pt.priority === 2 ? '💤' : '📥'
-              showActivity(`${label} Queued: ${pt.task.slice(0, 40)}...`)
-            }
-            console.log(`[BatchChat] Planned ${plan.tasks.length} tasks with dependencies`)
-          } else {
-            // Fallback: enqueue each independently
+        if (executeIntents.length > 0) {
             for (const ei of executeIntents) {
               enqueueTask(ei.action.task || ei.msg, ei.action.steps || [], ei.action.priority || 1)
             }
-          }
         } else {
           // Single or no execute intents — dispatch via IntentState
           for (const intent of intents) {
