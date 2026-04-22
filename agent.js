@@ -173,7 +173,7 @@ const Agent = (() => {
     if (ai.createConductor) {
       _conductor = ai.createConductor({
         strategy: 'dispatch',
-        dispatchMode: 'llm',
+        dispatchMode: 'code',
         planMode: true,
         maxSlots: 3,
         onWorkerStart: (task, abort, conductorOpts) => {
