@@ -169,16 +169,13 @@ const Agent = (() => {
     const AgenticClass = typeof Agentic === 'function' ? Agentic : Agentic.Agentic
     ai = new AgenticClass(opts)
 
-    // Initialize Conductor (replaces separate Dispatcher/IntentState/Scheduler)
-    if (typeof AgenticConductor !== 'undefined') {
-      const { createConductor } = AgenticConductor
-      _conductor = createConductor({
-        ai: { chat: (msgs, o) => ai.think(msgs[msgs.length-1]?.content || '', { ...o, history: msgs.slice(0, -1) }) },
+    // Initialize Conductor via Agentic facade
+    if (ai.createConductor) {
+      _conductor = ai.createConductor({
         strategy: 'dispatch',
         dispatchMode: 'llm',
         planMode: true,
         maxSlots: 3,
-        store: storeInstance || null,
         onWorkerStart: (task, abort, conductorOpts) => {
           return startWorker(task, [], abort, {
             workerId: conductorOpts.workerId,
