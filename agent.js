@@ -1,8 +1,8 @@
-/* agent.js - Dual-brain agent: Talker + Worker, powered by Agentic */
+/* agent.js - Dual-brain agent: Talker + Worker, powered by Agentic + Conductor */
 const Agent = (() => {
   let ai = null
+  let _conductor = null  // agentic-conductor instance
   const messages = []
-  // Scheduler handles task queue + parallel slots (see scheduler.js)
 
   // --- Chat persistence via agentic glue ---
   const MAX_MESSAGES = 50
@@ -168,14 +168,46 @@ const Agent = (() => {
     opts.embed = { provider: 'local', baseUrl: '/api' }
     const AgenticClass = typeof Agentic === 'function' ? Agentic : Agentic.Agentic
     ai = new AgenticClass(opts)
-    // configure call removed — embed passed via constructor
-    if (typeof Dispatcher !== 'undefined') Dispatcher.init(ai)
-    if (typeof IntentState !== 'undefined') IntentState.init()
 
-    // Wire Dispatcher → Talker: when all workers complete, Talker reports results
-    if (typeof Dispatcher !== 'undefined') {
-      Dispatcher.onResultsReady(() => {
-        reportViaTalker()
+    // Initialize Conductor (replaces separate Dispatcher/IntentState/Scheduler)
+    if (typeof AgenticConductor !== 'undefined') {
+      const { createConductor } = AgenticConductor
+      _conductor = createConductor({
+        ai: { chat: (msgs, o) => ai.think(msgs[msgs.length-1]?.content || '', { ...o, history: msgs.slice(0, -1) }) },
+        strategy: 'dispatch',
+        dispatchMode: 'llm',
+        planMode: true,
+        maxSlots: 3,
+        store: storeInstance || null,
+        onWorkerStart: (task, abort, conductorOpts) => {
+          return startWorker(task, [], abort, {
+            workerId: conductorOpts.workerId,
+            resume: conductorOpts.resume || false,
+            resumeTurn: conductorOpts.turnCount || 0,
+            conductorOpts,
+          })
+        },
+      })
+
+      // Expose conductor internals as globals for windows.js/app.js/register-capabilities.js compatibility
+      const _is = _conductor._intentState
+      _is.active = _is.getActive  // fluid compat alias
+      _is.all = _is.getAll        // fluid compat alias
+      _is.init = () => {}         // no-op, conductor handles init
+      window.IntentState = _is
+      window.Scheduler = _conductor._scheduler
+      const _disp = _conductor._dispatcher
+      // Add compat methods for windows.js
+      _disp.getState = () => ({ workers: _disp.getWorkers() })
+      _disp.formatForTalker = () => ''  // conductor handles this via intentState
+      _disp.checkForResume = async () => []  // conductor handles resume internally
+      _disp.init = () => {}  // no-op
+      _disp.onResultsReady = () => {}  // conductor uses events
+      window.Dispatcher = _disp
+
+      // Wire: when workers complete, Talker reports results
+      _conductor.on((event) => {
+        if (event === 'dispatcher.done') reportViaTalker()
       })
     }
 
@@ -416,20 +448,20 @@ const Agent = (() => {
 
   // --- Intent dispatch helpers (module scope, used by chat + batch) ---
   function _dispatchIntent(parsed) {
-    if (!parsed) return
+    if (!parsed || !_conductor) return
     if (parsed.intents && Array.isArray(parsed.intents)) {
       for (const i of parsed.intents) {
         if (i.action === 'create') {
-          IntentState.create(i.goal, { dependsOn: i.dependsOn || [] })
+          _conductor.createIntent(i.goal, { dependsOn: i.dependsOn || [] })
           showActivity(`\ud83d\udccb New: ${i.goal.slice(0, 40)}`)
         } else if (i.action === 'update' && i.id) {
-          IntentState.update(i.id, { goal: i.goal, message: i.message || i.context })
+          _conductor.updateIntent(i.id, { goal: i.goal, message: i.message || i.context })
           showActivity(`\u21aa Updated: ${i.goal.slice(0, 40)}`)
         } else if (i.action === 'cancel' && i.id) {
-          IntentState.cancel(i.id)
+          _conductor.cancelIntent(i.id)
           showActivity('Cancelled')
         } else if (i.action === 'done' && i.id) {
-          IntentState.done(i.id)
+          _conductor._intentState.done(i.id)
         }
       }
     }
@@ -617,8 +649,8 @@ const Agent = (() => {
   }
 
   function buildTalkerSystem(os, dynamicContext) {
-    const schedulerState = Scheduler.getState()
-    const runningTasks = schedulerState.running
+    const schedulerState = _conductor ? _conductor._scheduler.getState() : { pending: [], slots: [] }
+    const runningTasks = schedulerState.slots || []
     const queuedCount = schedulerState.pending.length
 
     // Soul is always loaded (identity)
@@ -652,11 +684,9 @@ Current OS state:
 - Installed apps: ${os.installedApps}
 - Installed skills: ${os.skills}
 `
-    // Inject system state (Dispatcher + IntentState)
-    const dispatchState = typeof Dispatcher !== 'undefined' ? Dispatcher.formatForTalker() : ''
-    if (dispatchState) sys += dispatchState
-    const intentState = typeof IntentState !== 'undefined' ? IntentState.formatForTalker() : ''
-    if (intentState) sys += intentState
+    // Inject system state from Conductor
+    const intentContext = _conductor ? _conductor._intentState.formatForTalker() : ''
+    if (intentContext) sys += intentContext
     sys += `\nCompleted recently: ${blackboard.completedSteps.map(s => s.text).join(', ') || 'none'}`
 
     sys += `\n\nWhen the user wants you to DO something (not just talk), output an intent block.
@@ -714,8 +744,8 @@ Be natural, concise, and have personality.`
   // --- Task scheduling via Scheduler ---
   function enqueueTask(taskDescription, steps, priority = 1, dependsOn = []) {
     console.log(`[enqueueTask] "${taskDescription.slice(0, 60)}" steps=${(steps||[]).length} priority=${priority} deps=[${dependsOn}]`)
-    Scheduler.enqueue(taskDescription, steps, priority, dependsOn)
-    if (!Scheduler.isIdle()) {
+    _conductor._scheduler.enqueue(taskDescription, steps, priority, dependsOn)
+    if (!_conductor._scheduler.isIdle()) {
       const label = priority === 0 ? '⚡' : priority === 2 ? '💤' : '📥'
       showActivity(`${label} Queued: ${taskDescription.slice(0, 40)}...`)
     }
@@ -724,8 +754,8 @@ Be natural, concise, and have personality.`
   // Scheduler calls this when a slot opens
   async function startWorker(taskDescription, plannedSteps, abort, opts = {}) {
     console.log(`[startWorker] called: "${taskDescription.slice(0, 60)}"${opts.resume ? ' (RESUME)' : ''}`)
-    const workerId = opts.workerId || Dispatcher.nextWorkerId()
-    Dispatcher.registerWorker(workerId, taskDescription, plannedSteps)
+    const workerId = opts.workerId || opts.conductorOpts?.workerId || 0
+    const conductorOpts = opts.conductorOpts || {}
 
     try {
     // Use Task Manager instead of Plan window
@@ -845,10 +875,10 @@ Be natural, concise, and have personality.`
         if (result.done) {
           task.status = 'done'
           blackboard.currentTask.status = 'done'
-          setWorkerStatus(Scheduler.isIdle() ? '✅ Done' : `⏳ ${Scheduler.getState().pending.length} queued`)
+          setWorkerStatus(_conductor._scheduler.isIdle() ? '✅ Done' : `⏳ ${_conductor._scheduler.getState().pending.length} queued`)
           steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
           WindowManager.updateTask(task)
-          Dispatcher.workerCompleted(workerId, { summary: result.summary || '', log: task.log })
+          _conductor.completeWorker(workerId, { summary: result.summary || '', log: task.log })
         }
         return result
       }
@@ -961,11 +991,10 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
       while (turnCount < MAX_TURNS && !workerDone) {
         if (abort.signal.aborted) throw new Error('aborted')
 
-        // --- Dispatcher checkpoint: before turn ---
-        const preDecision = await Dispatcher.beforeTurn(workerId)
+        // --- Conductor checkpoint: before turn ---
+        const preDecision = await _conductor.beforeTurn(workerId)
         if (preDecision.action === 'abort') throw new Error('aborted')
         if (preDecision.action === 'suspend') {
-          Dispatcher.updateWorker(workerId, { status: 'suspended', suspendedAt: Date.now() })
           return
         }
         if (preDecision.action === 'steer' && preDecision.instruction) {
@@ -1032,10 +1061,10 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
             if (result?.done) {
               task.status = 'done'
               blackboard.currentTask.status = 'done'
-              setWorkerStatus(Scheduler.isIdle() ? '✅ Done' : `⏳ ${Scheduler.getState().pending.length} queued`)
+              setWorkerStatus(_conductor._scheduler.isIdle() ? '✅ Done' : `⏳ ${_conductor._scheduler.getState().pending.length} queued`)
               steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
               WindowManager.updateTask(task)
-              Dispatcher.workerCompleted(workerId, { summary: result.summary || '', log: task.log })
+              _conductor.completeWorker(workerId, { summary: result.summary || '', log: task.log })
               workerDone = true
             }
           }
@@ -1063,30 +1092,19 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
 
         if (turn.done && !workerDone) workerDone = true
 
-        // --- Dispatcher checkpoint: after turn ---
-        Dispatcher.updateWorker(workerId, {
-          turnCount,
-          lastTool: turn.toolCalls[0]?.name || null,
-          lastResult: turn.text?.slice(0, 100) || null,
-          lastResultSummary: turn.text?.slice(0, 100) || '',
-          messages: workerMessages,
-          tools: Object.keys(allHandlers),
-          system: workerSystem,
-          totalTokens: (Dispatcher.getWorker(workerId)?.totalTokens || 0) + (turn.usage?.totalTokens || 0),
-          toolCallCount: (Dispatcher.getWorker(workerId)?.toolCallCount || 0) + turn.toolCalls.length,
-        })
-
-        const postDecision = await Dispatcher.afterTurn(workerId, {
-          ...turn,
+        // --- Conductor checkpoint: after turn ---
+        const postDecision = await _conductor.afterTurn(workerId, {
+          toolCalls: turn.toolCalls,
+          usage: turn.usage,
+          noProgress: turn.toolCalls.length === 0 && !turn.text,
           progress: turn.text?.slice(0, 150) || (turn.toolCalls.length > 0 ? `Used ${turn.toolCalls.map(tc => tc.name).join(', ')}` : ''),
           artifacts: _turnArtifacts,
         })
         if (postDecision?.action === 'abort') throw new Error('aborted')
         if (postDecision?.action === 'suspend') {
-          console.log(`[Worker #${workerId}] Suspended by Scheduler: ${postDecision.reason}`)
+          console.log(`[Worker #${workerId}] Suspended: ${postDecision.reason}`)
           task.log.push(`⏸ Suspended: ${postDecision.reason}`)
           setWorkerStatus(`⏸ Suspended: ${postDecision.reason?.slice(0, 30)}`)
-          Dispatcher.updateWorker(workerId, { status: 'suspended', suspendedAt: Date.now() })
           return
         }
         if (postDecision?.action === 'steer' && postDecision.instruction) {
@@ -1101,7 +1119,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         setWorkerStatus('✅ Done')
         steps.forEach(s => { if (s.status !== 'done') s.status = 'done' })
         WindowManager.updateTask(task)
-        Dispatcher.workerCompleted(workerId, { summary: '', log: task.log })
+        _conductor.completeWorker(workerId, { summary: '', log: task.log })
         setTimeout(() => setWorkerStatus(''), 3000)
       }
     } catch (err) {
@@ -1112,7 +1130,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         showActivity('Task interrupted')
         steps.forEach(s => { if (s.status === 'pending' || s.status === 'running') s.status = 'aborted' })
         WindowManager.updateTask(task)
-        Dispatcher.workerFailed(workerId, 'aborted')
+        _conductor.failWorker(workerId, 'aborted')
         setTimeout(() => setWorkerStatus(''), 2000)
       } else {
         task.status = 'error'
@@ -1124,17 +1142,13 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         addBubble('system', `Worker error: ${err.message}`)
         steps.forEach(s => { if (s.status !== 'done') s.status = 'error' })
         WindowManager.updateTask(task)
-        Dispatcher.workerFailed(workerId, err.message)
+        _conductor.failWorker(workerId, err.message)
       }
     } finally {
-      Dispatcher.updateWorker(workerId, { status: task.status })
-      Dispatcher.removeWorker(workerId)
     }
     } catch (outerErr) {
       // Catch errors in tool handler setup, fast lane, etc.
       console.error('[Worker] Outer error:', outerErr.message, outerErr.stack)
-      Dispatcher.updateWorker(workerId, { status: 'error' })
-      Dispatcher.removeWorker(workerId)
       throw outerErr  // Re-throw so Scheduler marks it as error
     }
   }
@@ -1165,7 +1179,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
       // Don't be too chatty (min 60s between proactive messages)
       if (Date.now() - lastProactive < 300000) return
       // Don't interrupt active work
-      if (!Scheduler.isIdle()) {
+      if (!_conductor._scheduler.isIdle()) {
         // But DO notify on task completion
         return
       }
@@ -1403,13 +1417,13 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
   async function _doReportViaTalker() {
     if (!ai) return
 
-    // IntentState.formatForTalker() already includes completed results
+    // Conductor provides intent context for reporting
     // We trigger a Talker turn with a system nudge
-    const intentContext = IntentState.formatForTalker() + Dispatcher.formatForTalker()
+    const intentContext = _conductor._intentState.formatForTalker()
     if (!intentContext.trim()) return
 
     // Collect settled intent IDs to mark as reported after
-    const settledIds = IntentState.all()
+    const settledIds = _conductor._intentState.getAll()
       .filter(i => (i.status === 'done' || i.status === 'failed') && !i._reported)
       .map(i => i.id)
     if (settledIds.length === 0) return
@@ -1453,7 +1467,7 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
       saveChat()
 
       // Mark intents as reported so they don't repeat
-      IntentState.markReported(...settledIds)
+      _conductor._intentState.markReported(...settledIds)
 
       // Speak if voice enabled
       if (Voice?.isEnabled() && !Voice.isListening()) Voice.speak(cleanReply(fullReply))
@@ -1467,25 +1481,17 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
   }
 
   // Wire Scheduler to startWorker
-  Scheduler._onStart = (task, steps, abort, opts) => startWorker(task, steps, abort, opts)
 
-  // Resume an unfinished task from checkpoint
+  // Resume an unfinished task — conductor handles re-enqueue internally
   async function resumeTask(workerId) {
-    const checkpoint = await Dispatcher.resumeWorker(workerId)
-    if (!checkpoint) {
-      console.warn('[resumeTask] No checkpoint found for', workerId)
+    const ok = _conductor.resumeWorker(workerId)
+    if (!ok) {
+      console.warn('[resumeTask] No suspended worker found for', workerId)
       return null
     }
-    const task = checkpoint.task || ''
-    const steps = checkpoint.worker?.steps || []
-    const resumeMessages = checkpoint.worker?.messages || []
-    const resumeTurn = checkpoint.turnIndex || 0
-    console.log(`[resumeTask] Resuming "${task.slice(0, 60)}" from turn ${resumeTurn}`)
-    // Create a new abort controller and start the worker with resume context
-    const abort = new AbortController()
-    await startWorker(task, steps, abort, { resume: true, resumeMessages, resumeTurn })
-    return checkpoint
+    console.log(`[resumeTask] Resumed worker ${workerId}`)
+    return true
   }
 
-  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getScheduler: () => Scheduler, renderBubbleContent, _messages: messages, getSkills: () => Array.from(customSkills.entries()).map(([name, s]) => ({ name, icon: s.icon, description: s.description })), deleteSkill: (name) => { customSkills.delete(name); VFS.rm(`/system/skills/${name}`, true) }, getTaskHistory: () => WindowManager.getTaskHistory?.() || [], resumeTask }
+  return { configure, getAi: () => ai, chat: chatWithTracking, blackboard, showActivity, startProactiveLoop, stopProactiveLoop, notify, restoreChatUI, loadSkills, getScheduler: () => _conductor?._scheduler, getConductor: () => _conductor, renderBubbleContent, _messages: messages, getSkills: () => Array.from(customSkills.entries()).map(([name, s]) => ({ name, icon: s.icon, description: s.description })), deleteSkill: (name) => { customSkills.delete(name); VFS.rm(`/system/skills/${name}`, true) }, getTaskHistory: () => WindowManager.getTaskHistory?.() || [], resumeTask }
 })() 
