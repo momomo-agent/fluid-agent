@@ -871,26 +871,30 @@ select.settings-input { appearance: none; cursor: pointer; }
 }
 
 /* ── DynamicApp ── */
-.dapp-body { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
-.dapp-title { font-size: 18px; font-weight: 600; color: var(--text); }
-.dapp-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
-.dapp-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 40px 0; }
-.dapp-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-.dapp-field { background: var(--surface-raised); border-radius: 8px; padding: 12px; }
-.dapp-field-key { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-.dapp-field-value { font-size: 14px; color: var(--text); word-break: break-word; }
-.dapp-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
-.dapp-action-btn { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer; transition: all 0.15s; }
+.dapp-body { padding: 12px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.dapp-title { font-size: 16px; font-weight: 600; color: var(--text); }
+.dapp-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.dapp-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 32px 0; }
+.dapp-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.dapp-field { background: var(--surface-raised); border-radius: 8px; padding: 10px 12px; }
+.dapp-field-key { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+.dapp-field-value { font-size: 15px; color: var(--text); word-break: break-word; font-weight: 500; }
+.dapp-hero { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; min-height: 80px; }
+.dapp-hero-value { font-size: 56px; font-weight: 200; color: var(--text); font-variant-numeric: tabular-nums; font-family: ui-monospace, 'SF Mono', monospace; }
+.dapp-hero-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+.dapp-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0 0; border-top: 1px solid var(--border-subtle); margin-top: auto; }
+.dapp-action-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; cursor: pointer; transition: all 0.15s; font-weight: 500; }
 .dapp-action-btn:hover { background: var(--surface-raised); }
+.dapp-action-btn:active { transform: scale(0.97); }
 .dapp-action-btn.dapp-primary { background: var(--accent); color: white; border-color: var(--accent); }
 .dapp-action-btn.dapp-primary:hover { filter: brightness(1.1); }
 .dapp-action-btn.dapp-danger { color: #ff6b6b; border-color: #ff6b6b44; }
 .dapp-action-btn.dapp-danger:hover { background: #ff6b6b22; }
-.dapp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.dapp-table th { text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--border); color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-.dapp-table td { padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); }
+.dapp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.dapp-table th { text-align: left; padding: 6px 10px; border-bottom: 2px solid var(--border); color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.dapp-table td { padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); }
 .dapp-table tr:hover td { background: var(--surface-raised); }
-.dapp-list-item { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
+.dapp-list-item { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); font-size: 12px; }
 .dapp-list-item:last-child { border-bottom: none; }
-.dapp-markdown { font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.dapp-markdown { font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .dapp-custom-frame { width: 100%; border: none; flex: 1; min-height: 200px; background: transparent; border-radius: 4px; }

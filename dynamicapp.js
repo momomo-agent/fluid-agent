@@ -252,16 +252,37 @@ ${injection}
       return
     }
 
-    // Default: render as key-value cards
+    // Auto-detect: if any value is an array of objects, render as table
+    const entries = Object.entries(object).filter(([k]) => k !== 'title' && k !== 'description')
+    const arrayEntry = entries.find(([, v]) => Array.isArray(v) && v.length > 0 && typeof v[0] === 'object')
+    if (arrayEntry) {
+      if (object.title) el.innerHTML += `<div class="dapp-title">${escapeHtml(object.title)}</div>`
+      renderTable(el, { rows: arrayEntry[1] })
+      return
+    }
+
     if (object.title) {
       el.innerHTML += `<div class="dapp-title">${escapeHtml(object.title)}</div>`
     }
     if (object.description) {
       el.innerHTML += `<div class="dapp-desc">${escapeHtml(object.description)}</div>`
     }
-    // Render remaining fields as cards
+
+    // Render remaining fields
     const skip = new Set(['title', 'description'])
     const fields = Object.entries(object).filter(([k]) => !skip.has(k))
+
+    // Hero mode: single numeric/short field → big centered display
+    if (fields.length === 1) {
+      const [key, value] = fields[0]
+      const strVal = String(value)
+      if (strVal.length <= 20 && typeof value !== 'object') {
+        el.innerHTML += `<div class="dapp-hero"><div class="dapp-hero-value">${escapeHtml(strVal)}</div><div class="dapp-hero-label">${escapeHtml(key)}</div></div>`
+        return
+      }
+    }
+
+    // Grid cards for multiple fields
     if (fields.length > 0) {
       const grid = document.createElement('div')
       grid.className = 'dapp-fields'
@@ -279,10 +300,12 @@ ${injection}
   }
 
   function renderTable(el, object) {
-    const cols = object.columns || (object.rows[0] ? Object.keys(object.rows[0]) : [])
+    const rows = object.rows || []
+    if (rows.length === 0) { el.innerHTML = '<div class="dapp-empty">No rows</div>'; return }
+    const cols = object.columns || Object.keys(rows[0])
     el.innerHTML = `<table class="dapp-table">
       <thead><tr>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
-      <tbody>${object.rows.map(row =>
+      <tbody>${rows.map(row =>
         `<tr>${cols.map(c => `<td>${escapeHtml(String(row[c] ?? ''))}</td>`).join('')}</tr>`
       ).join('')}</tbody>
     </table>`

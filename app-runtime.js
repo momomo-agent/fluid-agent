@@ -34,6 +34,7 @@ const AppRuntime = (() => {
 
     body.innerHTML = ''
     body.style.padding = '0'
+    body.style.paddingTop = '40px'
     body.style.display = 'flex'
     body.style.flexDirection = 'column'
 
@@ -58,7 +59,7 @@ const AppRuntime = (() => {
     if (actions.length > 0) {
       const actionsBar = document.createElement('div')
       actionsBar.className = 'dapp-actions'
-      actionsBar.style.cssText = 'flex-shrink:0;'
+      actionsBar.style.cssText = 'flex-shrink:0;padding:6px 10px;border-top:1px solid rgba(0,0,0,0.06);display:flex;flex-wrap:wrap;gap:6px;'
       for (const action of actions) {
         const btn = document.createElement('button')
         btn.className = 'dapp-action-btn'
