@@ -397,6 +397,17 @@
     handler: null // Special: wired up in agent.js (needs customSkills + parseSkillMd)
   })
 
+  // Auto-size for dynamicapp capability
+  function _capAutoSize(object, actions, html) {
+    // Custom HTML apps get medium by default (they control their own layout)
+    if (html && html.length > 500) return 'medium'
+    const keys = Object.keys(object || {})
+    const numActions = (actions || []).length
+    if (keys.length > 8 || (keys.length > 0 && Array.isArray(Object.values(object)[0]))) return 'large'
+    if (keys.length <= 4 && numActions <= 3) return 'small'
+    return 'medium'
+  }
+
   Capabilities.register('dynamicapp', {
     description: 'Create and manage dynamic app windows. Writes standard manifest+data+actions+view to /tmp/apps/. Use open to create/reopen, update to change data/view, list to see all, close to dismiss, destroy to delete. Provide custom HTML via the html parameter for rich views. Data available as window.__app.data, dispatch actions via window.__app.dispatch(id, params).',
     icon: '⚡',
@@ -434,7 +445,8 @@
           const viewFile = html ? 'view.html' : null
           const manifest = {
             id, name: title || id, icon: icon || '⚡',
-            size: 'medium', sandboxed: true, ephemeral: true,
+            size: _capAutoSize(object, actions, html),
+            sandboxed: true, ephemeral: true,
             data: 'data.json', actions: 'actions.json',
             _appPath: appDir,
           }

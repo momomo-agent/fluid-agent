@@ -27,7 +27,7 @@ const DynamicApp = (() => {
   }
 
   // Create a DynamicApp: write state files + open window
-  function create(id, { title, icon, object, actions, view } = {}) {
+  function create(id, { title, icon, object, actions, view, size } = {}) {
     const p = paths(id)
     VFS.mkdir(p.dir)
     VFS.writeFile(p.meta, JSON.stringify({
@@ -38,13 +38,16 @@ const DynamicApp = (() => {
     VFS.writeFile(p.actions, JSON.stringify(actions || [], null, 2))
     if (view) VFS.writeFile(p.view, JSON.stringify(view, null, 2))
 
+    // Auto-size: small for simple data, medium for complex
+    const appSize = size || _autoSize(object, actions)
+
     // Register as ephemeral app and open
     const meta = readJSON(p.meta)
     AppRegistry.register({
       id: `dapp-${id}`, name: meta.title, icon: meta.icon,
       sandboxed: false, ephemeral: true, builtin: false,
       showInLaunchpad: false,
-      size: 'medium',
+      size: appSize,
       render: (w, body) => renderDynamicApp(id, w, body),
     })
     const winId = WindowManager.openApp(`dapp-${id}`)
@@ -58,12 +61,15 @@ const DynamicApp = (() => {
     const meta = readJSON(p.meta)
     if (!meta) return { error: `DynamicApp "${id}" not found` }
 
+    const object = readJSON(p.object) || {}
+    const actions = readJSON(p.actions) || []
+
     if (!AppRegistry.has(`dapp-${id}`)) {
       AppRegistry.register({
         id: `dapp-${id}`, name: meta.title, icon: meta.icon,
         sandboxed: false, ephemeral: true, builtin: false,
         showInLaunchpad: false,
-        size: 'medium',
+        size: _autoSize(object, actions),
         render: (w, body) => renderDynamicApp(id, w, body),
       })
     }
@@ -345,6 +351,17 @@ ${injection}
   }
 
   // ── Action dispatch (unified with IntentState) ──
+
+  // Auto-determine window size based on content complexity
+  function _autoSize(object, actions) {
+    const keys = Object.keys(object || {})
+    const numActions = (actions || []).length
+    // Large: many fields or table-like data
+    if (keys.length > 8 || (keys.length > 0 && Array.isArray(Object.values(object)[0]))) return 'large'
+    // Small: few fields, few actions
+    if (keys.length <= 4 && numActions <= 3) return 'small'
+    return 'medium'
+  }
 
   function _dispatchAction(appId, actionId, params) {
     // Read action definition to check for local mutate
