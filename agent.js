@@ -203,8 +203,8 @@ const Agent = (() => {
       window.Dispatcher = _disp
 
       // Wire: when workers complete, Talker reports results
-      _conductor.on((event) => {
-        if (event === 'dispatcher.done') reportViaTalker()
+      _conductor.on((event, data) => {
+        if (event === 'dispatcher.done') reportViaTalker(data)
       })
     }
 
@@ -1418,8 +1418,12 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
     return { reply: fullReply, action: parsedIntent }
   }
 
+  // Track last completed worker data for reportViaTalker
+  let _lastCompletedWorkerData = []
+
   // Dispatcher notifies Talker: all workers settled, report results via Talker's full context
-  async function reportViaTalker() {
+  async function reportViaTalker(doneData) {
+    if (doneData) _lastCompletedWorkerData.push(doneData)
     // Enqueue into the shared chat queue so it serializes with user messages
     return new Promise((resolve) => {
       _chatQueue.push({ type: 'report', resolve, reject: resolve })
@@ -1452,7 +1456,22 @@ ALMOST ALWAYS respond with {"speak": false}. Only speak if something truly impor
         : ''
 
       // Use Talker's system prompt + full conversation history
-      const systemNudge = `[SYSTEM] Workers have completed. Report the results to the user.\n${intentContext}`
+      // Include completed worker messages so Talker knows what was done
+      let workerMsgContext = ''
+      if (_lastCompletedWorkerData.length > 0) {
+        workerMsgContext = _lastCompletedWorkerData.map(d => {
+          const msgs = (d.messages || []).slice(-10)
+          if (msgs.length === 0) return ''
+          const formatted = msgs.map(m => {
+            const role = m.role === 'assistant' ? 'Worker' : m.role === 'tool' ? 'ToolResult' : 'System'
+            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+            return `  [${role}] ${content.slice(0, 500)}`
+          }).join('\n')
+          return `Worker results:\n${formatted}`
+        }).filter(Boolean).join('\n\n')
+        _lastCompletedWorkerData = []
+      }
+      const systemNudge = `[SYSTEM] Workers have completed. Report the results to the user.\n${intentContext}${workerMsgContext ? '\n\n## Completed Worker Context\n' + workerMsgContext : ''}`
 
       await ai.think(systemNudge, {
         system: buildTalkerSystem(os, dynamicContext),
