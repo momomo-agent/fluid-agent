@@ -684,6 +684,9 @@ Current OS state:
     // Inject system state from Conductor
     const intentContext = _conductor ? _conductor._intentState.formatForTalker() : ''
     if (intentContext) sys += intentContext
+    // Inject worker conversation context so Talker knows what Workers are doing
+    const workerContext = _conductor ? _conductor.getWorkerContext() : ''
+    if (workerContext) sys += '\n\n## Worker Activity\n' + workerContext
     sys += `\nCompleted recently: ${blackboard.completedSteps.map(s => s.text).join(', ') || 'none'}`
 
     sys += `\n\nWhen the user wants you to DO something (not just talk), output an intent block.
@@ -896,7 +899,8 @@ Be natural, concise, and have personality.`
       .filter(([name]) => !loadedTools.has(name))
       .map(([name, desc]) => `  - ${name}: ${desc}`)
       .join('\n')
-    const workerSystem = `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
+    const soul = VFS.isFile('/system/SOUL.md') ? VFS.readFile('/system/SOUL.md') : ''
+    const workerSystem = `${soul ? soul + '\n\n' : ''}You are the execution engine of Fluid Agent OS. Execute the given task using tools.
 CRITICAL: You MUST use tools to complete tasks. NEVER answer with just text — always call tools to take action. If you need information, call web_search. If you need to show results, call dynamicapp. If you need to show a location, call map. Text-only responses are failures.
 
 Current OS state:
@@ -1104,6 +1108,7 @@ When finished, call the done tool with a summary. Set summary to "silent" if the
         const postDecision = await _conductor.afterTurn(workerId, {
           toolCalls: turn.toolCalls,
           usage: turn.usage,
+          messages: workerMessages,
           noProgress: turn.toolCalls.length === 0 && !turn.text,
           progress: turn.text?.slice(0, 150) || (turn.toolCalls.length > 0 ? `Used ${turn.toolCalls.map(tc => tc.name).join(', ')}` : ''),
           artifacts: _turnArtifacts,
