@@ -964,6 +964,17 @@ System APIs via window.fluidOS:
 - window.fluidOS.notify(message)
 - window.fluidOS.playMusic({title, artist, url})
 
+### Design Guidelines for Custom HTML
+- Dark theme: use dark backgrounds (#1a1a2e, #16213e, #0f0c29) with light text
+- Use modern CSS: flexbox, grid, gradients, border-radius, backdrop-filter
+- Monospace fonts for numbers/data: ui-monospace, 'SF Mono', monospace
+- System font for text: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif
+- Accent colors: #4ade80 (green), #60a5fa (blue), #f472b6 (pink), #fbbf24 (amber)
+- Keep it minimal — less is more. White space is good.
+- For single-value displays (timer, counter, score): big centered number, small label below
+- For data grids: use CSS grid with subtle card backgrounds
+- Animations: subtle transitions only (opacity, transform). No flashy effects.
+
 ### When to use what
 - Task output, dashboards, quick viz → dynamicapp (ephemeral)
 - User-facing app they want to keep → persistent app with manifest

@@ -2331,10 +2331,16 @@ ${css}
     })
     if (ids.length === 0) return false
     const n = ids.length
+    // Auto-select layout: grid for 3+, horizontal for 2, single for 1
+    if (!layout) layout = n >= 3 ? 'grid' : n === 2 ? 'horizontal' : 'horizontal'
+    const gap = 8 // px gap between windows
+    const { w: areaW, h: areaH } = getAreaSize()
+    const gapNormX = gap / areaW
+    const gapNormY = gap / areaH
     if (layout === 'horizontal') {
       ids.forEach((id, i) => {
         const win = windows.get(id)
-        const norm = { x: i / n, y: 0, width: 1 / n, height: 1 }
+        const norm = { x: i / n + gapNormX / 2, y: gapNormY / 2, width: 1 / n - gapNormX, height: 1 - gapNormY }
         win._norm = norm
         applyPx(win.el, norm)
       })
@@ -2345,15 +2351,15 @@ ${css}
         const win = windows.get(id)
         const col = i % cols
         const row = Math.floor(i / cols)
-        const norm = { x: col / cols, y: row / rows, width: 1 / cols, height: 1 / rows }
+        const norm = { x: col / cols + gapNormX / 2, y: row / rows + gapNormY / 2, width: 1 / cols - gapNormX, height: 1 / rows - gapNormY }
         win._norm = norm
         applyPx(win.el, norm)
       })
     } else {
-      // vertical (default)
+      // vertical
       ids.forEach((id, i) => {
         const win = windows.get(id)
-        const norm = { x: 0, y: i / n, width: 1, height: 1 / n }
+        const norm = { x: gapNormX / 2, y: i / n + gapNormY / 2, width: 1 - gapNormX, height: 1 / n - gapNormY }
         win._norm = norm
         applyPx(win.el, norm)
       })
