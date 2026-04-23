@@ -165,11 +165,19 @@ const DynamicApp = (() => {
   function triggerAction(actionId, params) {
     window.parent.postMessage({ type: 'dapp-action', appId: window.__appId, actionId, params: params || {} }, '*');
   }
+  // Also expose as window.__app for consistency with AppRuntime bridge
+  window.__app = {
+    get data() { return window.__object; },
+    get actions() { return window.__actions; },
+    dispatch: triggerAction,
+    onDataUpdate: function(cb) { window.__onDataUpdateCbs = window.__onDataUpdateCbs || []; window.__onDataUpdateCbs.push(cb); }
+  };
   // Listen for data updates from parent (smart re-render)
   window.addEventListener('message', (e) => {
     if (e.data?.type === 'dapp-update' && e.data.object) {
       window.__object = e.data.object;
       if (typeof onDataUpdate === 'function') onDataUpdate(window.__object);
+      (window.__onDataUpdateCbs || []).forEach(cb => cb(window.__object));
     }
   });
   // Notify parent of height changes for auto-resize
@@ -201,9 +209,7 @@ ${injection}
     const msgHandler = (e) => {
       if (e.source !== iframe.contentWindow) return
       if (e.data?.type === 'dapp-action') {
-        if (typeof EventBus !== 'undefined') {
-          EventBus.emit('dynamicapp.action', { appId: e.data.appId, actionId: e.data.actionId, params: e.data.params || {} })
-        }
+        _dispatchAction(e.data.appId, e.data.actionId, e.data.params || {})
       } else if (e.data?.type === 'dapp-resize') {
         iframe.style.height = Math.min(e.data.height + 20, 800) + 'px'
       }
@@ -285,10 +291,7 @@ ${injection}
       if (action.style === 'danger') btn.classList.add('dapp-danger')
       if (action.style === 'primary') btn.classList.add('dapp-primary')
       btn.addEventListener('click', () => {
-        // Emit action event for the agent to handle
-        if (typeof EventBus !== 'undefined') {
-          EventBus.emit('dynamicapp.action', { appId, actionId: action.id, params: action.params || {} })
-        }
+        _dispatchAction(appId, action.id, action.params || {})
       })
       el.appendChild(btn)
     }
@@ -339,6 +342,44 @@ ${injection}
     const div = document.createElement('div')
     div.textContent = str
     return div.innerHTML
+  }
+
+  // ── Action dispatch (unified with IntentState) ──
+
+  function _dispatchAction(appId, actionId, params) {
+    // Read action definition to check for local mutate
+    const p = paths(appId)
+    const actions = readJSON(p.actions) || []
+    const actionDef = actions.find(a => a.id === actionId)
+
+    if (actionDef?.handler === 'local' && actionDef.mutate) {
+      // Local mutate: update object.json directly, VFS watcher pushes to iframe
+      const object = readJSON(p.object) || {}
+      const newObject = { ...object }
+      for (const [key, expr] of Object.entries(actionDef.mutate)) {
+        try {
+          const fn = new Function(...Object.keys(object), ...Object.keys(params || {}), `return (${expr})`)
+          newObject[key] = fn(...Object.values(object), ...Object.values(params || {}))
+        } catch (err) {
+          console.warn(`[DynamicApp] Mutate error for "${key}":`, err)
+        }
+      }
+      VFS.writeFile(p.object, JSON.stringify(newObject, null, 2))
+    } else {
+      // Route to IntentState → Dispatcher → Worker (same as AppRuntime)
+      const meta = readJSON(p.meta) || { title: appId }
+      const object = readJSON(p.object) || {}
+      const label = actionDef?.label || actionId
+      const dataSnippet = JSON.stringify(object).slice(0, 500)
+      const paramStr = params && Object.keys(params).length ? ` with ${JSON.stringify(params)}` : ''
+      const goal = `User clicked "${label}"${paramStr} in ${meta.title} app. Current data: ${dataSnippet}.`
+
+      if (typeof IntentState !== 'undefined') {
+        IntentState.create(goal)
+      } else if (typeof EventBus !== 'undefined') {
+        EventBus.emit('dynamicapp.action', { appId, actionId, params })
+      }
+    }
   }
 
   return { create, open, close, destroy, update, list, paths, readJSON, renderDynamicApp, BASE }
