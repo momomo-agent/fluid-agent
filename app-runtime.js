@@ -34,11 +34,13 @@ const AppRuntime = (() => {
 
     body.innerHTML = ''
     body.style.padding = '0'
+    body.style.display = 'flex'
+    body.style.flexDirection = 'column'
 
     const iframe = document.createElement('iframe')
     iframe.className = 'app-runtime-frame'
-    iframe.style.cssText = 'width:100%;height:100%;border:none;background:transparent;'
-    iframe.setAttribute('sandbox', 'allow-scripts')
+    iframe.style.cssText = 'width:100%;flex:1;border:none;background:transparent;min-height:0;'
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin')
 
     if (isURL) {
       // External URL — load via src
@@ -51,6 +53,26 @@ const AppRuntime = (() => {
     }
 
     body.appendChild(iframe)
+
+    // Render action buttons below iframe (same style as DynamicApp)
+    if (actions.length > 0) {
+      const actionsBar = document.createElement('div')
+      actionsBar.className = 'dapp-actions'
+      actionsBar.style.cssText = 'flex-shrink:0;'
+      for (const action of actions) {
+        const btn = document.createElement('button')
+        btn.className = 'dapp-action-btn'
+        btn.textContent = action.label || action.id
+        if (action.icon) btn.textContent = `${action.icon} ${btn.textContent}`
+        if (action.style === 'danger') btn.classList.add('dapp-danger')
+        if (action.style === 'primary') btn.classList.add('dapp-primary')
+        btn.addEventListener('click', () => {
+          _executeAction(action.id, action.params || {}, manifest, appPath, dataPath, actionsPath)
+        })
+        actionsBar.appendChild(btn)
+      }
+      body.appendChild(actionsBar)
+    }
 
     // Set up bridge message listener
     const msgHandler = _createBridgeHandler(iframe, manifest, appPath, dataPath, actionsPath, w)

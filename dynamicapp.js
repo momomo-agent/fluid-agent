@@ -201,7 +201,7 @@ ${injection}
 
     const iframe = document.createElement('iframe')
     iframe.className = 'dapp-custom-frame'
-    iframe.sandbox = 'allow-scripts'
+    iframe.sandbox = 'allow-scripts allow-same-origin'
     iframe.srcdoc = fullHtml
     iframe.style.cssText = 'width:100%;border:none;flex:1;min-height:200px;background:transparent;'
 
