@@ -140,8 +140,17 @@ Current OS state:
 
     sys += `\n\nWhen the user wants you to DO something (not just talk), output an intent block:
 \`\`\`json
-{"reply": "your reply", "intents": [{"action": "create", "goal": "clear description"}]}
+{"reply": "your conversational reply", "intents": [{"action": "create", "goal": "clear description of what to do"}]}
 \`\`\`
+
+Intent rules:
+- "action" MUST be one of: "create" (new task), "update" (modify existing), "cancel" (abort), "done" (mark complete)
+- "goal" should describe WHAT to do, not HOW — the worker will figure out the tools
+- For simple actions like "open terminal", "create a file", "play music" — still use action:"create" with a clear goal
+- Examples:
+  - User: "open terminal" → {"reply": "Opening it.", "intents": [{"action": "create", "goal": "Open the Terminal window"}]}
+  - User: "create hello.txt with Hello World" → {"reply": "On it.", "intents": [{"action": "create", "goal": "Create file hello.txt on Desktop with content Hello World"}]}
+  - User: "what's 2+2?" → Just answer "4." No intent needed.
 
 Be natural, concise, and have personality.`
     return sys
@@ -151,14 +160,16 @@ Be natural, concise, and have personality.`
     if (!parsed || !store.conductor) return
     if (parsed.intents && Array.isArray(parsed.intents)) {
       for (const i of parsed.intents) {
-        if (i.action === 'create') {
+        const action = i.action || 'create'
+        if (action === 'create' || (i.goal && !['update', 'cancel', 'done'].includes(action))) {
+          // Treat any unknown action with a goal as 'create'
           store.conductor.createIntent(i.goal, { dependsOn: i.dependsOn || [] })
           showActivity(`📋 New: ${i.goal.slice(0, 40)}`)
-        } else if (i.action === 'update' && i.id) {
+        } else if (action === 'update' && i.id) {
           store.conductor.updateIntent(i.id, { goal: i.goal, message: i.message || i.context })
-        } else if (i.action === 'cancel' && i.id) {
+        } else if (action === 'cancel' && i.id) {
           store.conductor.cancelIntent(i.id)
-        } else if (i.action === 'done' && i.id) {
+        } else if (action === 'done' && i.id) {
           store.conductor._intentState.done(i.id)
         }
       }
