@@ -317,16 +317,32 @@ const WindowManager = (() => {
 
   // --- Dock ---
   function updateDock() {
-    const dock = document.getElementById('dock')
-    if (!dock) return
+    const running = document.getElementById('dock-running')
+    if (!running) return
     const items = [...windows.values()]
-    dock.innerHTML = items.map(w => {
+    // Collect pinned app types so we don't duplicate them in running section
+    const pinnedTypes = new Set()
+    document.querySelectorAll('.dock-pinned .dock-item[data-app]').forEach(el => pinnedTypes.add(el.dataset.app))
+    const runningItems = items.filter(w => !pinnedTypes.has(w.type))
+    running.innerHTML = runningItems.map(w => {
       const icon = _getIcon(w.type)
       const min = w.el.classList.contains('minimized') ? ' dock-minimized' : ''
       const foc = w.el.classList.contains('focused') ? ' dock-focused' : ''
-      return `<div class="dock-item${min}${foc}" data-id="${w.el.id}" title="${w.title}">${icon}</div>`
+      return `<div class="dock-item dock-app${min}${foc}" data-id="${w.el.id}" title="${w.title}">${icon}</div>`
     }).join('')
-    dock.querySelectorAll('.dock-item').forEach(el => {
+    // Show separator only when there are running items
+    const sep = document.querySelector('.dock-separator')
+    if (sep) sep.style.display = runningItems.length > 0 ? '' : 'none'
+    // Update pinned items: add active indicator for open windows
+    document.querySelectorAll('.dock-pinned .dock-item[data-app]').forEach(el => {
+      const appType = el.dataset.app
+      const isOpen = items.some(w => w.type === appType)
+      el.classList.toggle('dock-active', isOpen)
+      const isFocused = items.some(w => w.type === appType && w.el.classList.contains('focused'))
+      el.classList.toggle('dock-focused', isFocused)
+    })
+    // Click handlers for running items
+    running.querySelectorAll('.dock-item').forEach(el => {
       el.addEventListener('click', () => {
         const id = el.dataset.id
         const w = windows.get(id)

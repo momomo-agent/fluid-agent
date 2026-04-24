@@ -109,6 +109,8 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'SF P
 }
 .dock-item:active { transform: scale(1.2); }
 .dock-item.minimized { opacity: 0.45; }
+.dock-item.dock-active::after { content: ''; width: 4px; height: 4px; border-radius: 50%; background: rgba(0,0,0,0.5); position: absolute; bottom: -2px; }
+.dock-item.dock-focused::after { background: rgba(0,0,0,0.8); }
 .dock-running-dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(0,0,0,0.4); position: absolute; bottom: -2px; }
 
 /* ── Windows ── */
