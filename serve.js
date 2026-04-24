@@ -70,7 +70,7 @@ const server = http.createServer((req, res) => {
     const stat = fs.statSync(filePath)
     if (stat.isDirectory()) filePath = path.join(filePath, 'index.html')
     const ext = path.extname(filePath)
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' })
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache' })
     fs.createReadStream(filePath).pipe(res)
   } catch {
     res.writeHead(404); res.end('Not found')

@@ -231,7 +231,7 @@ async function restoreSession(store) {
   const snapshot = await store.get('session')
   if (!snapshot || !Array.isArray(snapshot) || snapshot.length === 0) return false
 
-  const { w: areaW, h: areaH } = getAreaSize()
+  const { w: areaW, h: areaH } = WM.getAreaSize()
   let focusId = null
   for (const win of snapshot) {
     // Support both normalized (nx/ny/nw/nh) and legacy px (x/y/width/height)

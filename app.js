@@ -191,7 +191,7 @@
     function updateTaskHoverPanel() {
       const bb = Agent.blackboard
       const ct = bb.currentTask
-      const queued = Agent.getScheduler ? Agent.getScheduler().getState().pending : []
+      const queued = Agent.getScheduler?.()?.getState?.()?.pending || []
       const history = WindowManager.getTaskHistory ? WindowManager.getTaskHistory() : []
 
       let html = '<div class="thp-header"><span class="thp-title">Task Manager</span></div>'
@@ -259,8 +259,8 @@
         const steps = bb.currentTask.steps || []
         const doneCount = steps.filter(s => s.status === 'done').length
         const total = steps.length
-        const schedulerState = Agent.getScheduler ? Agent.getScheduler().getState() : { pending: [], running: [] }
-        const queued = schedulerState.pending.length + Math.max(0, schedulerState.running.length - 1)
+        const schedulerState = Agent.getScheduler?.()?.getState?.() || { pending: [], slots: new Map() }
+        const queued = (schedulerState.pending?.length || 0) + Math.max(0, (schedulerState.slots?.size || schedulerState.slots?.length || 0) - 1)
         const queueText = queued > 0 ? ` +${queued}` : ''
         taskStatusEl.innerHTML = `<div class="spinner"></div><span class="island-goal">${goal}</span>${queueText ? `<span class="island-meta">${queueText}</span>` : ''}`
         taskStatusEl.classList.add('island-active')

@@ -159,7 +159,10 @@ const Agent = (() => {
     // Use CORS proxy only when explicitly enabled in settings
     const settings = window._settingsCache || {}
     if (settings.useProxy && !(baseUrl && baseUrl.includes('localhost'))) {
-      opts.proxyUrl = 'https://proxy.link2web.site'
+      // Use local CORS proxy when running on localhost, external proxy otherwise
+      opts.proxyUrl = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+        ? location.origin + '/api/proxy'
+        : 'https://proxy.link2web.site'
     }
     if (storeInstance) opts.store = { instance: storeInstance }
     else opts.store = { name: 'fluid-agent' }

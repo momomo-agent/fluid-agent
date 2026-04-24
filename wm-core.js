@@ -283,7 +283,8 @@ const WindowManager = (() => {
     if (renderer) {
       renderer(w, body)
     } else if (typeof AppRuntime !== 'undefined' && AppRuntime.canRender && AppRuntime.canRender(w.type)) {
-      AppRuntime.render(w, body)
+      const _app = AppRegistry.get(w.type)
+      AppRuntime.render(body, _app, _app._appPath, w)
     } else {
       body.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Unknown window type: ${w.type}</div>`
     }

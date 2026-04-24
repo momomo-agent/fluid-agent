@@ -264,5 +264,15 @@ ${bridgeScript}
     return !!(manifest && manifest.view)
   }
 
-  return { render, hasView, _cleanup }
+  /**
+   * Check if AppRuntime can render a given window type (by app id).
+   */
+  function canRender(type) {
+    if (typeof AppRegistry === 'undefined') return false
+    const app = AppRegistry.get(type)
+    if (!app) return false
+    return !!(app._appPath || app.html || app.view)
+  }
+
+  return { render, hasView, canRender, _cleanup }
 })()
