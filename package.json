@@ -1,0 +1,20 @@
+{
+  "name": "fluid-agent",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.32",
+    "pinia": "^3.0.2",
+    "mitt": "^3.0.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.6",
+    "vite": "^8.0.10"
+  }
+}

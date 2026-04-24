@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluid Agent OS</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230f1219'/><circle cx='50' cy='50' r='24' fill='none' stroke='%2360a5fa' stroke-width='4'/><circle cx='50' cy='50' r='8' fill='%2360a5fa'/></svg>">
+<link rel="stylesheet" href="style.css?v=1777039243">
+</head>
+<body>
+  <!-- API Key Modal -->
+  <!-- Main Layout -->
+  <div id="app">
+    <!-- Spotlight -->
+    <div id="spotlight" class="hidden">
+      <input id="spotlight-input" type="text" placeholder="Search files, apps, or ask anything..." autocomplete="off" />
+      <div id="spotlight-results"></div>
+    </div>
+
+    <!-- Left: Virtual Desktop -->
+    <div id="desktop">
+      <div id="desktop-header">
+        <span class="desktop-title">FluidOS</span>
+        <div id="activity-stream"></div>
+        <div id="header-right">
+          <div id="task-status-wrap">
+            <div id="task-status"></div>
+            <div id="task-hover-panel" class="hidden"></div>
+          </div>
+          <span id="clock"></span>
+        </div>
+      </div>
+      <div id="desktop-area">
+        <div id="desktop-wallpaper"></div>
+      </div>
+      <div id="dock">
+        <div class="dock-pinned">
+          <div class="dock-item" data-app="launchpad" title="Launchpad">🚀</div>
+          <div class="dock-item" data-app="finder" title="Finder">📁</div>
+          <div class="dock-item" data-app="terminal" title="Terminal">⬛</div>
+          <div class="dock-item" data-app="browser" title="Browser">🌐</div>
+          <div class="dock-item" data-app="music" title="Music">🎵</div>
+          <div class="dock-item" data-app="video" title="Video">🎬</div>
+          <div class="dock-item" data-app="map" title="Map">🗺️</div>
+          <div class="dock-item" data-app="settings" title="Settings">⚙️</div>
+          <div class="dock-item" data-app="spotlight" title="Search">🔍</div>
+        </div>
+        <div class="dock-separator"></div>
+        <div class="dock-running" id="dock-running"></div>
+      </div>
+    </div>
+
+    <!-- Right: Chat Panel -->
+    <div id="chat-panel">
+      <div id="chat-header">
+        <div class="chat-title">Agent</div>
+        <button id="clear-chat-btn" onclick="document.getElementById('chat-messages').innerHTML='';Agent._messages.length=0;window._store?.set('chat',null);" title="Clear chat">🗑️</button>
+      </div>
+      <div id="chat-messages"></div>
+      <div id="chat-input-area">
+        <div id="voice-interim"></div>
+        <textarea id="chat-input" placeholder="Message the agent..." rows="1"></textarea>
+        <button id="voice-btn" title="Click to toggle voice, hold to push-to-talk"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
+        <button id="chat-send"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="eventbus.js?v=1777039243"></script>
+  <script src="lib/agentic.bundle.js?v=1777039243"></script>
+  <script src="fs.js?v=1777039243"></script>
+  <script src="shell.js?v=1777039243"></script>
+  <script src="skills.js?v=1777039243"></script>
+  <script src="capabilities.js?v=1777039243"></script>
+  <script src="app-registry.js?v=1777039243"></script>
+  <script src="dynamicapp.js?v=1777039243"></script>
+  <script src="app-runtime.js?v=1777039243"></script>
+  <script src="audio-synth.js?v=1777039243"></script>
+  <script src="wm-core.js?v=1777039243"></script>
+  <script src="wm-builtins.js?v=1777039243"></script>
+  <script src="wm-media.js?v=1777039243"></script>
+  <script src="wm-apps.js?v=1777039243"></script>
+  <script src="wm-layout.js?v=1777039243"></script>
+  <script src="register-capabilities.js?v=1777039243"></script>
+  <!-- voice is in the bundle -->
+  <script src="voice.js?v=1777039243"></script>
+  <script src="agent.js?v=1777039243"></script>
+  <script src="app.js?v=1777039243"></script>
+</body>
+</html>
