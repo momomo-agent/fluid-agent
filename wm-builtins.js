@@ -568,50 +568,123 @@ function updateTask(task) {
   if (taskManagerId && windows.has(taskManagerId)) renderTaskManager(task?.id)
 }
 
+function _renderConductorTab() {
+  const conductor = typeof Agent !== 'undefined' ? Agent.getConductor() : null
+  if (!conductor) return '<div class="tm-empty">Conductor not initialized</div>'
+
+  const state = conductor.getState()
+  const intents = state.intents || []
+  const workers = state.workers || []
+  const suspended = state.suspended || []
+
+  // Build intent→worker map
+  const workerByIntent = {}
+  for (const w of workers) { if (w.intentId) workerByIntent[w.intentId] = w }
+
+  if (!intents.length && !workers.length) {
+    return `<div class="cd-empty-state">
+      <div class="cd-empty-icon">⚡</div>
+      <div class="cd-empty-title">Conductor Ready</div>
+      <div class="cd-empty-hint">Ask the agent to do something — intents and workers will appear here in real time.</div>
+    </div>`
+  }
+
+  // Sort: running first, then active, then done/cancelled
+  const order = { running: 0, active: 1, suspended: 2, pending: 3, done: 4, failed: 5, cancelled: 6 }
+  const sorted = [...intents].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9))
+
+  // Stats bar
+  const running = intents.filter(i => i.status === 'active' || i.status === 'running').length
+  const done = intents.filter(i => i.status === 'done').length
+  const activeWorkers = workers.filter(w => w.status === 'running').length
+  const statsHtml = `<div class="cd-stats">
+    <span class="cd-stat"><span class="cd-stat-dot running"></span>${running} active</span>
+    <span class="cd-stat"><span class="cd-stat-dot done"></span>${done} done</span>
+    <span class="cd-stat"><span class="cd-stat-dot worker"></span>${activeWorkers} worker${activeWorkers !== 1 ? 's' : ''}</span>
+    ${suspended.length ? `<span class="cd-stat"><span class="cd-stat-dot suspended"></span>${suspended.length} suspended</span>` : ''}
+  </div>`
+
+  const cardsHtml = sorted.map(intent => {
+    const worker = workerByIntent[intent.id]
+    const statusClass = intent.status === 'done' ? 'done' : intent.status === 'active' || intent.status === 'running' ? 'running' : intent.status === 'cancelled' ? 'cancelled' : intent.status === 'failed' ? 'failed' : 'pending'
+    const statusIcon = intent.status === 'active' || intent.status === 'running' ? '▶' : intent.status === 'done' ? '✓' : intent.status === 'cancelled' ? '✕' : intent.status === 'failed' ? '✕' : '○'
+    const age = Math.round((Date.now() - intent.createdAt) / 1000)
+    const ageStr = age < 60 ? age + 's' : age < 3600 ? Math.round(age / 60) + 'm' : Math.round(age / 3600) + 'h'
+
+    // Dependency info
+    const deps = intent.dependsOn || []
+    const depHtml = deps.length ? `<div class="cd-card-deps">${deps.map(depId => {
+      const dep = intents.find(i => i.id === depId)
+      const depDone = dep && dep.status === 'done'
+      return `<span class="cd-dep ${depDone ? 'resolved' : 'waiting'}">⏳ ${dep ? dep.goal.slice(0, 25) : depId}${depDone ? ' ✓' : ''}</span>`
+    }).join('')}</div>` : ''
+
+    // Worker output
+    let workerHtml = ''
+    if (worker) {
+      const turnInfo = worker.turnCount ? `Turn ${worker.turnCount}` : ''
+      const toolInfo = worker.lastTool ? `Last: ${worker.lastTool}` : ''
+      const stepsHtml = (worker.steps || []).map(s => {
+        const sIcon = s.status === 'done' ? '✓' : s.status === 'running' ? '▶' : '○'
+        return `<div class="cd-worker-step ${s.status || ''}">${sIcon} ${(s.text || s.step || '').slice(0, 60)}</div>`
+      }).join('')
+      workerHtml = `<div class="cd-card-worker">
+        <div class="cd-worker-header">
+          <span class="cd-worker-id">#${worker.workerId || worker.id || '?'}</span>
+          <span class="cd-worker-meta">${[turnInfo, toolInfo].filter(Boolean).join(' · ')}</span>
+          <span class="cd-worker-status ${worker.status}">${worker.status}</span>
+        </div>
+        ${stepsHtml ? `<div class="cd-worker-steps">${stepsHtml}</div>` : ''}
+      </div>`
+    }
+
+    // Messages (user refinements)
+    const msgs = intent.messages || []
+    const msgsHtml = msgs.length > 0 ? `<div class="cd-card-messages">${msgs.slice(-3).map(m => `<div class="cd-card-msg">"${(m || '').slice(0, 80)}${(m || '').length > 80 ? '…' : ''}"</div>`).join('')}</div>` : ''
+
+    return `<div class="cd-card ${statusClass}">
+      <div class="cd-card-header">
+        <span class="cd-card-status">${statusIcon}</span>
+        <span class="cd-card-id">${intent.id}</span>
+        <span class="cd-card-age">${ageStr}</span>
+      </div>
+      <div class="cd-card-goal">${intent.goal}</div>
+      ${depHtml}
+      ${workerHtml}
+      ${msgsHtml}
+    </div>`
+  }).join('')
+
+  return `${statsHtml}<div class="cd-cards">${cardsHtml}</div>`
+}
+
 function renderTaskManager(selectedId, view) {
   const w = windows.get(taskManagerId)
   if (!w) return
   const body = w.el.querySelector('.window-body')
-  const currentView = view || body.dataset.view || 'detail'
+  const currentView = view || body.dataset.view || 'conductor'
   body.dataset.view = currentView
   const sel = selectedId || taskHistory[0]?.id
   const selected = taskHistory.find(t => t.id === sel) || taskHistory[0]
 
   // Queue overview from Dispatcher + Scheduler
-  const _ds = typeof Dispatcher !== 'undefined' ? Dispatcher.getState() : { workers: [] }
+  const _ds = typeof Dispatcher !== 'undefined' && Dispatcher?.getState ? Dispatcher.getState() : { workers: [] }
   const ds = { running: _ds.workers?.filter(w => w.status === 'running') || [], pending: _ds.workers?.filter(w => w.status === 'suspended' || w.status === 'pending') || [] }
-  const ss = typeof Scheduler !== 'undefined' ? Scheduler.getState() : { slots: [], pending: [], completed: [] }
+  const ss = typeof Scheduler !== 'undefined' && Scheduler?.getState ? Scheduler.getState() : { slots: [], pending: [], completed: [] }
 
   // Intent state
-  const intents = typeof IntentState !== 'undefined' ? IntentState.all() : []
+  const intents = typeof IntentState !== 'undefined' && IntentState?.all ? IntentState.all() : []
   const activeIntents = intents.filter(i => i.status === 'active')
 
   body.innerHTML = `<div class="tm-layout">
     <div class="tm-tabs">
+      <button class="tm-tab ${currentView === 'conductor' ? 'active' : ''}" data-view="conductor">Conductor${activeIntents.length ? ` · ${activeIntents.length}` : ''}</button>
       <button class="tm-tab ${currentView === 'detail' ? 'active' : ''}" data-view="detail">Tasks</button>
       <button class="tm-tab ${currentView === 'log' ? 'active' : ''}" data-view="log">Log${selected?.log?.length ? ` · ${selected.log.length}` : ''}</button>
       <button class="tm-tab ${currentView === 'queue' ? 'active' : ''}" data-view="queue">Queue${ds.running.length + ds.pending.length + ss.pending.length > 0 ? ` · ${ds.running.length + ds.pending.length + ss.pending.length}` : ''}</button>
-      <button class="tm-tab ${currentView === 'intents' ? 'active' : ''}" data-view="intents">Intents${activeIntents.length ? ` · ${activeIntents.length}` : ''}</button>
     </div>
-    ${currentView === 'intents' ? `
-    <div class="tm-intents">
-      ${intents.length ? intents.sort((a, b) => b.updatedAt - a.updatedAt).map(i => {
-        const statusIcon = i.status === 'active' ? '▶' : i.status === 'done' ? '✓' : i.status === 'cancelled' ? '✕' : '○'
-        const age = Math.round((Date.now() - i.createdAt) / 1000)
-        const ageStr = age < 60 ? age + 's' : age < 3600 ? Math.round(age / 60) + 'm' : Math.round(age / 3600) + 'h'
-        const msgs = i.messages || []
-        return `<div class="tm-intent-item ${i.status}">
-          <div class="tm-intent-header">
-            <span class="tm-intent-status">${statusIcon}</span>
-            <span class="tm-intent-id">${i.id}</span>
-            <span class="tm-intent-age">${ageStr}</span>
-          </div>
-          <div class="tm-intent-goal">${i.goal}</div>
-          ${msgs.length ? `<div class="tm-intent-messages">${msgs.slice(-5).map(m => `<div class="tm-intent-msg">"${m.slice(0, 60)}${m.length > 60 ? '…' : ''}"</div>`).join('')}</div>` : ''}
-          ${i.goalHistory?.length ? `<div class="tm-intent-history">${i.goalHistory.map(h => `<div class="tm-intent-prev-goal">← ${h.goal.slice(0, 50)}</div>`).join('')}</div>` : ''}
-        </div>`
-      }).join('') : '<div class="tm-empty">No intents yet</div>'}
-    </div>` : currentView === 'queue' ? `
+    ${currentView === 'conductor' ? `
+    <div class="cd-panel">${_renderConductorTab()}</div>` : currentView === 'queue' ? `
     <div class="tm-queue">
       ${ds.running.length ? `<div class="tm-queue-section">Running</div>${ds.running.map(r => `<div class="tm-queue-item running"><span>▶</span><span>${(r.task || '').slice(0,50)}</span></div>`).join('')}` : ''}
       ${ss.pending.length ? `<div class="tm-queue-section">Waiting (${ss.pending.length})</div>${ss.pending.map(p => `<div class="tm-queue-item pending"><span>${p.priority === 0 ? '⚡' : p.priority === 2 ? '💤' : '○'}</span><span>${(p.task || '').slice(0,50)}${p.dependsOn?.length ? ' <span style="opacity:.5;font-size:11px">⏳ waiting for #' + p.dependsOn.join(', #') + '</span>' : ''}</span></div>`).join('')}` : ''}
@@ -660,6 +733,15 @@ if (typeof EventBus !== 'undefined') {
   EventBus.on('scheduler.paused', _tmRefresh)
   EventBus.on('scheduler.aborted', _tmRefresh)
   EventBus.on('intent.changed', _tmRefresh)
+  // Conductor events (bridged from agent.js)
+  EventBus.on('conductor.dispatcher.spawn', _tmRefresh)
+  EventBus.on('conductor.dispatcher.done', _tmRefresh)
+  EventBus.on('conductor.dispatcher.fail', _tmRefresh)
+  EventBus.on('conductor.dispatcher.plan', _tmRefresh)
+  EventBus.on('conductor.dispatcher.resume', _tmRefresh)
+  EventBus.on('conductor.scheduler.started', _tmRefresh)
+  EventBus.on('conductor.scheduler.finished', _tmRefresh)
+  EventBus.on('conductor.chat', _tmRefresh)
 }
 
 // Refresh all finder windows when FS changes

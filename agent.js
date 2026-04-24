@@ -174,6 +174,7 @@ const Agent = (() => {
       _conductor = ai.createConductor({
         strategy: 'dispatch',
         dispatchMode: 'code',
+        intentMode: 'tools',
         planMode: true,
         maxSlots: 3,
         onWorkerStart: (task, abort, conductorOpts) => {
@@ -205,6 +206,10 @@ const Agent = (() => {
       // Wire: when workers complete, Talker reports results
       _conductor.on((event, data) => {
         if (event === 'dispatcher.done') reportViaTalker(data)
+        // Bridge conductor events to EventBus for Task Manager refresh
+        if (typeof EventBus !== 'undefined') {
+          EventBus.emit('conductor.' + event, data)
+        }
       })
     }
 
