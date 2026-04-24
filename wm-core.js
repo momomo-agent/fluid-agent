@@ -161,10 +161,10 @@ const WindowManager = (() => {
 
     // Title bar
     const tb = document.createElement('div')
-    tb.className = 'title-bar'
+    tb.className = 'window-titlebar'
     const dots = document.createElement('div')
     dots.className = 'window-dots'
-    dots.innerHTML = '<span class="dot dot-close"></span><span class="dot dot-min"></span><span class="dot dot-max"></span>'
+    dots.innerHTML = '<span class="window-dot close"></span><span class="window-dot minimize"></span><span class="window-dot maximize"></span>'
     const titleSpan = document.createElement('span')
     titleSpan.className = 'window-title'
     titleSpan.textContent = title || type
@@ -176,7 +176,7 @@ const WindowManager = (() => {
 
     // Resize handle
     const rh = document.createElement('div')
-    rh.className = 'resize-handle'
+    rh.className = 'window-resize'
 
     el.append(tb, body, rh)
     area().appendChild(el)
@@ -194,13 +194,13 @@ const WindowManager = (() => {
     windows.forEach((ww, wid) => { if (wid !== id) ww.el.classList.remove('focused') })
 
     // Dot handlers
-    dots.querySelector('.dot-close').onclick = e => { e.stopPropagation(); _close(id) }
-    dots.querySelector('.dot-min').onclick = e => { e.stopPropagation(); minimize(id) }
-    dots.querySelector('.dot-max').onclick = e => { e.stopPropagation(); toggleFullscreen(id) }
+    dots.querySelector('.close').onclick = e => { e.stopPropagation(); _close(id) }
+    dots.querySelector('.minimize').onclick = e => { e.stopPropagation(); minimize(id) }
+    dots.querySelector('.maximize').onclick = e => { e.stopPropagation(); toggleFullscreen(id) }
 
     // Drag
     tb.addEventListener('mousedown', e => {
-      if (e.target.classList.contains('dot') || e.target.closest('.dot')) return
+      if (e.target.classList.contains('window-dot') || e.target.closest('.window-dot')) return
       focus(id)
       const rect = el.getBoundingClientRect()
       const areaRect = area().getBoundingClientRect()
