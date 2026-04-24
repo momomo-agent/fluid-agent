@@ -1,15 +1,17 @@
 /* FluidOS — Global Styles */
 :root {
-  --bg-desktop: linear-gradient(135deg, #e8dfd5 0%, #c9bfb0 40%, #a8c4c0 70%, #8fb8c8 100%);
-  --bg-glass: rgba(255, 255, 255, 0.55);
-  --bg-glass-dark: rgba(30, 30, 30, 0.75);
-  --text: #1d1d1f;
-  --text-dim: #6e6e73;
-  --text-muted: #aeaeb2;
-  --accent: #007aff;
+  --bg-desktop: linear-gradient(135deg, #0f0f1a 0%, #1a1b2e 40%, #1e293b 70%, #0f172a 100%);
+  --bg-glass: rgba(30, 32, 48, 0.75);
+  --bg-glass-dark: rgba(20, 22, 35, 0.85);
+  --text: #e2e8f0;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-dim: #64748b;
+  --text-muted: #475569;
+  --accent: #60a5fa;
   --radius: 12px;
-  --shadow: 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
-  --shadow-focused: 0 12px 48px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08);
+  --shadow: 0 8px 32px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.2);
+  --shadow-focused: 0 12px 48px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.25);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -18,9 +20,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Helvetica Neue
 /* ── Menu Bar ── */
 #menu-bar {
   height: 28px; display: flex; align-items: center; justify-content: space-between;
-  padding: 0 16px; background: rgba(255,255,255,0.65);
+  padding: 0 16px; background: rgba(15,15,26,0.75);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-  border-bottom: 0.5px solid rgba(0,0,0,0.08);
+  border-bottom: 0.5px solid rgba(255,255,255,0.06);
   font-size: 13px; font-weight: 500; color: var(--text);
   z-index: 9999; position: relative;
 }
@@ -35,14 +37,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Helvetica Neue
   position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: flex-end; gap: 2px;
   padding: 4px 8px; border-radius: 18px;
-  background: rgba(255,255,255,0.45);
+  background: rgba(30,32,48,0.65);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-  border: 0.5px solid rgba(255,255,255,0.5);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.2);
   z-index: 9998;
 }
 .dock-pinned, .dock-running { display: flex; align-items: flex-end; gap: 2px; }
-.dock-separator { width: 1px; height: 32px; background: rgba(0,0,0,0.1); margin: 0 6px; flex-shrink: 0; align-self: center; }
+.dock-separator { width: 1px; height: 32px; background: rgba(255,255,255,0.1); margin: 0 6px; flex-shrink: 0; align-self: center; }
 .dock-item {
   width: 46px; height: 46px; display: flex; align-items: center; justify-content: center;
   font-size: 34px; border-radius: 12px; cursor: pointer;

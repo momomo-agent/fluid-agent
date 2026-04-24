@@ -100,5 +100,23 @@ export const useVFSStore = defineStore('vfs', () => {
 
   init()
 
-  return { tree, mkdir, writeFile, readFile, isFile, isDir, ls, rm, init }
+  function normPath(p) {
+    return '/' + p.split('/').filter(Boolean).join('/')
+  }
+
+  function find(basePath, query) {
+    const results = []
+    function scan(path) {
+      const entries = ls(path) || []
+      for (const e of entries) {
+        const full = path === '/' ? `/${e.name}` : `${path}/${e.name}`
+        results.push(full)
+        if (e.type === 'dir' && results.length < 200) scan(full)
+      }
+    }
+    scan(basePath)
+    return results
+  }
+
+  return { tree, mkdir, writeFile, readFile, isFile, isDir, ls, rm, init, normPath, find }
 })
