@@ -71,7 +71,7 @@ function getRenderer(type) {
 </script>
 
 <template>
-  <div id="desktop-area" :style="wallpaperStyle">
+  <div id="desktop-area" :style="wallpaperStyle || undefined">
     <Window
       v-for="win in store.windowList"
       :key="win.id"

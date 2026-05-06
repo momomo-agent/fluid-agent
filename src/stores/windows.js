@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, reactive } from 'vue'
 
 let _nextId = 1
 let _topZ = 100
@@ -19,7 +19,7 @@ export const useWindowsStore = defineStore('windows', () => {
     // Find position if not specified — smart positioning to avoid overlap
     const pos = (x != null && y != null) ? { x, y } : _findPosition(width, height)
 
-    const win = {
+    const win = reactive({
       id, type, title: title || type,
       x: pos.x, y: pos.y, width, height,
       zIndex: ++_topZ,
@@ -27,7 +27,7 @@ export const useWindowsStore = defineStore('windows', () => {
       data, component,
       // Normalized coords (0-1)
       nx: 0, ny: 0, nw: 0, nh: 0
-    }
+    })
     _updateNorm(win)
     windows.value.set(id, win)
     focusedId.value = id
