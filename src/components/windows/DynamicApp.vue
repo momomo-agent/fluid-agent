@@ -113,6 +113,20 @@ const objectHtml = computed(() => {
   if (obj.title) html += `<div class="dapp-title">${escapeHtml(obj.title)}</div>`
   if (obj.description) html += `<div class="dapp-desc">${escapeHtml(obj.description)}</div>`
 
+  // Markdown template
+  if (obj.content && typeof obj.content === 'string') {
+    html += `<div class="dapp-markdown">${escapeHtml(obj.content).replace(/\n/g, '<br>')}</div>`
+    return html
+  }
+
+  // List template
+  if (Array.isArray(obj.items)) {
+    html += `<div class="dapp-list">${obj.items.map(item =>
+      `<div class="dapp-list-item">${typeof item === 'string' ? escapeHtml(item) : escapeHtml(item.text || JSON.stringify(item))}</div>`
+    ).join('')}</div>`
+    return html
+  }
+
   // Auto-detect array → table
   const arrayEntry = entries.find(([, v]) => Array.isArray(v) && v.length > 0 && typeof v[0] === 'object')
   if (arrayEntry) {

@@ -29,8 +29,10 @@ const PRESETS = {
   default: 'linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0d0d2b 100%)'
 }
 
-function onWallpaperChange({ css, url, preset }) {
-  if (preset && PRESETS[preset]) {
+function onWallpaperChange({ css, url, preset, background }) {
+  if (background) {
+    wallpaperStyle.value = `background: ${background}`
+  } else if (preset && PRESETS[preset]) {
     wallpaperStyle.value = `background: ${PRESETS[preset]}`
   } else if (url) {
     wallpaperStyle.value = `background: url(${url}) center/cover no-repeat`

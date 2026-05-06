@@ -72,6 +72,12 @@ onMounted(() => {
 
   // Configure agent if settings exist
   if (settings.isConfigured()) {
+    // Expose settings cache for capabilities that read from window._settingsCache
+    window._settingsCache = {
+      tavilyKey: settings.tavilyKey,
+      tmdbKey: settings.tmdbKey,
+      useProxy: settings.useProxy,
+    }
     agent.configure()
     agent.loadSkills()
     agent.startProactiveLoop()

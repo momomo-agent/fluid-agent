@@ -89,17 +89,27 @@ export function useAgent() {
 
   function getOsState() {
     const wins = windows.windowList.map(w => {
-      return `${w.title}(${w.type})`
+      const flags = [w.id === windows.focusedId && 'focused', w.minimized && 'min', w.maximized && 'max'].filter(Boolean).join(',')
+      return `${w.title}(${w.type})${flags ? ' {' + flags + '}' : ''}`
     }).join(' | ') || 'none'
+
+    // Installed apps from /home/user/apps
+    const appDirs = vfs.ls('/home/user/apps') || []
+    const installedApps = appDirs.filter(d => d.type === 'dir').map(d => {
+      try {
+        const manifest = JSON.parse(vfs.readFile(`/home/user/apps/${d.name}/manifest.json`) || '{}')
+        return `${manifest.icon || '💻'} ${manifest.name || d.name}`
+      } catch { return `💻 ${d.name}` }
+    }).join(', ') || 'none'
 
     return {
       windows: wins,
-      desktopSize: 'auto',
-      focused: windows.focusedWindow ? windows.focusedWindow.type : 'none',
+      desktopSize: `${window.innerWidth}x${window.innerHeight}`,
+      focused: windows.focusedWindow ? `${windows.focusedWindow.type}${windows.focusedWindow.data?.path ? ' (' + windows.focusedWindow.data.path + ')' : ''}` : 'none',
       cwd: shell.getCwd(),
       desktop: vfs.ls('/home/user/Desktop')?.map(f => f.name) || [],
       documents: vfs.ls('/home/user/Documents')?.map(f => f.name) || [],
-      installedApps: 'none',
+      installedApps,
       skills: store.customSkills.size > 0
         ? Array.from(store.customSkills.entries()).map(([n, s]) => `${s.icon} ${n}`).join(', ')
         : 'none',
@@ -108,20 +118,28 @@ export function useAgent() {
 
   function buildTalkerSystem(os) {
     const schedulerState = store.conductor ? store.conductor._scheduler.getState() : { pending: [], slots: [] }
-    const runningTasks = schedulerState.slots || []
+
+    // Load soul from VFS
+    const soul = vfs.isFile('/system/SOUL.md') ? vfs.readFile('/system/SOUL.md') : ''
 
     let sys = `You are Fluid Agent — part companion, part operating system.
 
 You're a conversational AI that also happens to control an entire desktop environment. Most of the time, you're just talking — answering questions, discussing ideas, brainstorming, being helpful and interesting. When the user wants something done (open a file, play music, build an app), you make it happen.
 
+${soul ? `## Your Soul\n${soul}\n` : ''}
+
 Know the difference:
 - "What do you think about X?" → Just talk. Have opinions. Be thoughtful.
 - "Open my files" / "Play some music" / "Make me a calculator" → Create an intent.
+- "Find X in my files" → Reply first ("Let me look"), then create an intent.
 
-You are an operating system with these capabilities:
+You are an operating system with these capabilities (Workers use these tools to execute tasks):
 ${capabilities.describe()}
 
+IMPORTANT: Use native tools, not the browser. Music → search_music + music tool. Weather → get_weather. Maps → map tool. Only use browser when the user explicitly wants to browse a website.
+
 Current OS state:
+- Desktop size: ${os.desktopSize}
 - Open windows: ${os.windows}
 - Focused window: ${os.focused}
 - Working directory: ${os.cwd}
@@ -139,19 +157,48 @@ Current OS state:
       if (workerContext) sys += '\n\n## Worker Activity\n' + workerContext
     }
 
-    sys += `\n\nWhen the user wants you to DO something (not just talk), output an intent block:
+    sys += `\nCompleted recently: ${store.blackboard.completedSteps.map(s => s.text).join(', ') || 'none'}`
+
+    sys += `\n\nWhen the user wants you to DO something (not just talk), output an intent block.
+
+Your job is to understand what the user wants and express it as intents. You do NOT decide how to schedule or execute — the Dispatcher handles that.
+
+## Intent Actions
+
+**CREATE** — user wants something new done:
 \`\`\`json
-{"reply": "your conversational reply", "intents": [{"action": "create", "goal": "clear description of what to do"}]}
+{"reply": "your reply", "intents": [{"action": "create", "goal": "clear description of what to achieve"}]}
 \`\`\`
 
-Intent rules:
-- "action" MUST be one of: "create" (new task), "update" (modify existing), "cancel" (abort), "done" (mark complete)
-- "goal" should describe WHAT to do, not HOW — the worker will figure out the tools
-- For simple actions like "open terminal", "create a file", "play music" — still use action:"create" with a clear goal
-- Examples:
-  - User: "open terminal" → {"reply": "Opening it.", "intents": [{"action": "create", "goal": "Open the Terminal window"}]}
-  - User: "create hello.txt with Hello World" → {"reply": "On it.", "intents": [{"action": "create", "goal": "Create file hello.txt on Desktop with content Hello World"}]}
-  - User: "what's 2+2?" → Just answer "4." No intent needed.
+**CREATE with dependencies** — new intent that needs results from other intents:
+\`\`\`json
+{"reply": "your reply", "intents": [{"action": "create", "goal": "combine results into a report", "dependsOn": ["intent-1", "intent-2"]}]}
+\`\`\`
+
+**UPDATE** — user refines, adds to, or changes an existing intent:
+\`\`\`json
+{"reply": "your reply", "intents": [{"action": "update", "id": "intent-1", "goal": "re-summarized complete goal", "message": "the user's exact words"}]}
+\`\`\`
+
+**CANCEL** — user wants to stop something:
+\`\`\`json
+{"reply": "your reply", "intents": [{"action": "cancel", "id": "intent-1"}]}
+\`\`\`
+
+**DONE** — mark intent as completed:
+\`\`\`json
+{"reply": "your reply", "intents": [{"action": "done", "id": "intent-1"}]}
+\`\`\`
+
+## Key Rules
+
+1. Check Active Intents above. If the user's message relates to an existing intent, UPDATE it — don't create a duplicate.
+2. Write clear, complete goals. "播放一下" is bad. "播放刚才找到的周杰伦的歌" is good.
+3. Multiple independent goals = multiple create intents in one block.
+4. Sequential goals (B depends on A) = create B with dependsOn: ["intent-A"].
+5. BIAS TOWARD ACTION: If the user's request could be fulfilled by using tools, create an intent. Only skip intents for pure opinions, philosophical questions, or casual chat.
+6. DON'T ASK, DO: If information is missing, make reasonable assumptions and act.
+7. NO TOOL ≠ NO ACTION: If no dedicated tool exists, use general tools creatively.
 
 Be natural, concise, and have personality.`
     return sys
@@ -422,28 +469,59 @@ Be natural, concise, and have personality.`
       .filter(([name]) => !loadedTools.has(name))
       .map(([name, desc]) => `  - ${name}: ${desc}`)
       .join('\n')
+    const soul = vfs.isFile('/system/SOUL.md') ? vfs.readFile('/system/SOUL.md') : ''
 
-    const workerSystem = `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
-CRITICAL: You MUST use tools to complete tasks. NEVER answer with just text.
-
-Filesystem layout:
-- Home directory: /home/user
-- Desktop: /home/user/Desktop
-- Documents: /home/user/Documents
-- Downloads: /home/user/Downloads
-- System: /system (memory, skills, tools)
-- Temp: /tmp
+    const workerSystem = `${soul ? soul + '\n\n' : ''}You are the execution engine of Fluid Agent OS. Execute the given task using tools.
+CRITICAL: You MUST use tools to complete tasks. NEVER answer with just text — always call tools to take action. If you need information, call web_search. If you need to show results, call dynamicapp. Text-only responses are failures.
 
 Current OS state:
+- Desktop size: ${os.desktopSize}
 - Open windows: ${os.windows}
 - Working directory: ${os.cwd}
 - Desktop files: ${JSON.stringify(os.desktop)}
+- Installed apps: ${os.installedApps}
 
+Planned steps:
+${task.steps.length ? task.steps.map((s, i) => (i + '. ' + s.text)).join('\n') : '(none — call plan_steps first to set your execution plan)'}
+
+## Tool System
 Active tools: ${activeNames}.
+
 More tools available — call search_tools({names: [...]}) to activate:
 ${extendedToolList}
 
-When finished, call the done tool with a summary.`
+PREFER native apps over browser. Use music for music, map for locations, video for videos.
+The browser app fetches and renders web content (not an iframe). For data extraction and search, use web_search/web_fetch tools directly.
+To play music: search_tools({names:["search_music","music"]}) → search_music({query}) → music({action:"add_and_play",...}).
+Once loaded, tools stay available for the rest of this task.
+
+## Apps — Unified Format
+
+Every app is a directory with manifest.json + optional view/data/actions files.
+
+### Quick App (dynamicapp tool — ephemeral, /tmp/apps/)
+For task results, dashboards, quick visualizations:
+- dynamicapp({action:"open", id:"weather", title:"Weather", icon:"🌤️", object:{temp:"25°C"}, html:"<div>...</div>"})
+- Data available as window.__app.data in your HTML
+- Dispatch actions via window.__app.dispatch(actionId, params)
+- Listen for data updates: window.__app.onDataUpdate(callback)
+- Update data: dynamicapp({action:"update", id:"weather", object:{temp:"30°C"}}) — view auto-updates
+
+### Persistent App (fs + app tool — /home/user/apps/)
+For apps the user wants to keep:
+1. Write files using fs tool
+2. Then: app({action:"create", name:"my-app"})
+
+### Design Guidelines for Custom HTML
+- Dark theme: use dark backgrounds (#1a1a2e, #16213e, #0f0c29) with light text
+- Use modern CSS: flexbox, grid, gradients, border-radius, backdrop-filter
+- Monospace fonts for numbers/data: ui-monospace, 'SF Mono', monospace
+- System font for text: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif
+- Accent colors: #4ade80 (green), #60a5fa (blue), #f472b6 (pink), #fbbf24 (amber)
+- Keep it minimal — less is more. White space is good.
+
+IMPORTANT: If no planned steps are listed above, call plan_steps FIRST to set your execution plan.
+When finished, call the done tool with a summary. Set summary to "silent" if the action itself IS the result (e.g. playing music, changing wallpaper).`
 
     let workerMessages = [{ role: 'user', content: taskDescription }]
     let turnCount = opts.resumeTurn || 0
@@ -465,30 +543,42 @@ When finished, call the done tool with a summary.`
         }
 
         turnCount++
-        let turn
-        try {
-          turn = await store.ai.step(workerMessages, {
-            tools: getActiveTools(),
-            system: workerSystem,
-            stream: true,
-            signal: abort.signal,
-            maxTokens: 16384,
-            emit: (type, data) => {
-              if (type === 'token' && data.text) showActivity(`✍️ ${data.text.slice(-30)}`)
-            },
-          })
-        } catch (stepErr) {
-          if (abort.signal.aborted) throw stepErr
-          throw stepErr
+        let turn, retries = 0
+        while (retries < 3) {
+          try {
+            turn = await store.ai.step(workerMessages, {
+              tools: getActiveTools(),
+              system: workerSystem,
+              stream: true,
+              signal: abort.signal,
+              maxTokens: 16384,
+              emit: (type, data) => {
+                if (type === 'token' && data.text) showActivity(`✍️ ${data.text.slice(-30)}`)
+              },
+            })
+            break
+          } catch (stepErr) {
+            if (abort.signal.aborted) throw stepErr
+            retries++
+            if (retries >= 3) throw stepErr
+            const isRetryable = stepErr.message?.includes('network') || stepErr.message?.includes('fetch') || stepErr.message?.includes('ERR_') || [429, 500, 502, 503].includes(stepErr.status)
+            if (!isRetryable) throw stepErr
+            const delay = retries * 2000
+            console.warn(`[Worker] Retry ${retries}/3 after: ${stepErr.message} (waiting ${delay}ms)`)
+            showActivity(`⚠️ Retry ${retries}/3...`)
+            await new Promise(r => setTimeout(r, delay))
+          }
         }
 
         workerMessages = turn.messages
 
         // Execute tool calls
+        let _turnArtifacts = []
         if (turn.toolCalls.length > 0) {
           const results = []
           for (const tc of turn.toolCalls) {
             if (abort.signal.aborted) throw new Error('aborted')
+            store.blackboard.workerLog.push({ tool: tc.name, params: tc.input, time: Date.now() })
             task.log.push(`${tc.name}: ${JSON.stringify(tc.input).slice(0, 60)}`)
             EventBus.emit('tool.call', { name: tc.name, input: JSON.stringify(tc.input).slice(0, 80) })
             showActivity(`🔧 ${tc.name}`)
@@ -496,6 +586,14 @@ When finished, call the done tool with a summary.`
             capabilities.recordUse(tc.name)
             const result = handler ? await handler(tc.input) : { error: `Unknown tool: ${tc.name}` }
             results.push(result)
+
+            // Extract artifacts (window IDs, file paths)
+            const rs = typeof result === 'string' ? result : JSON.stringify(result || '')
+            const winMatch = rs.match(/"winId"\s*:\s*"(win-\d+)"/)
+            if (winMatch) _turnArtifacts.push(winMatch[1])
+            const pathMatch = rs.match(/\/home\/[^"\s]+/g)
+            if (pathMatch) _turnArtifacts.push(...pathMatch)
+
             EventBus.emit('task.update', task)
 
             if (result?.done) {
@@ -535,12 +633,17 @@ When finished, call the done tool with a summary.`
             toolCalls: turn.toolCalls,
             usage: turn.usage,
             messages: workerMessages,
-            noProgress: turn.toolCalls.length === 0,
-            progress: turn.toolCalls.length > 0 ? `Used ${turn.toolCalls.map(tc => tc.name).join(', ')}` : '',
-            artifacts: [],
+            noProgress: turn.toolCalls.length === 0 && !turn.text,
+            progress: turn.toolCalls.length > 0 ? `Used ${turn.toolCalls.map(tc => tc.name).join(', ')}` : (turn.text?.slice(0, 150) || ''),
+            artifacts: _turnArtifacts,
           })
           if (postDecision?.action === 'abort') throw new Error('aborted')
           if (postDecision?.action === 'suspend') return
+          if (postDecision?.action === 'steer' && postDecision.instruction) {
+            workerMessages.push({ role: 'user', content: `[DIRECTION CHANGE] ${postDecision.instruction}` })
+            task.log.push(`↪ Steered: ${postDecision.instruction}`)
+            showActivity(`↪ Steering: ${postDecision.instruction.slice(0, 40)}`)
+          }
         }
       }
 
