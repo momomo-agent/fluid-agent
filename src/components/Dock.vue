@@ -67,7 +67,7 @@ function focusRunning(id) {
       <div
         v-for="win in runningWindows"
         :key="win.id"
-        class="dock-item dock-app"
+        class="dock-item dock-app dock-active"
         :class="{ 'dock-focused': store.focusedId === win.id }"
         :title="win.title"
         @click="focusRunning(win.id)"

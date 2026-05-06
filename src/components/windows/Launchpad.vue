@@ -1,10 +1,11 @@
 <script setup>
 import { computed } from 'vue'
-import { useEventBus } from '../../composables/useEventBus'
+import { EventBus } from '../../composables/useEventBus'
 import { useVFSStore } from '../../stores/vfs'
+import { useAppRegistryStore } from '../../stores/appRegistry'
 
-const bus = useEventBus()
 const vfs = useVFSStore()
+const appRegistry = useAppRegistryStore()
 
 const builtinApps = [
   { id: 'finder', name: 'Finder', icon: '📁' },
@@ -17,21 +18,37 @@ const builtinApps = [
 ]
 
 const customApps = computed(() => {
+  // Get apps from registry that aren't builtin
+  const registryApps = appRegistry.list(a => !a.builtin && a.showInLaunchpad !== false && !a.ephemeral)
+  if (registryApps.length > 0) {
+    return registryApps.map(a => ({ id: a.id, name: a.name, icon: a.icon || '💻', custom: true }))
+  }
+  // Fallback: scan VFS directly
   const dirs = vfs.ls('/home/user/apps') || []
   return dirs.filter(d => d.type === 'dir').map(d => {
-    let icon = '💻'
+    let icon = '💻', name = d.name
     try {
       const manifest = vfs.readFile(`/home/user/apps/${d.name}/manifest.json`)
-      if (manifest) icon = JSON.parse(manifest).icon || '💻'
+      if (manifest) {
+        const m = JSON.parse(manifest)
+        icon = m.icon || '💻'
+        name = m.name || d.name
+      }
     } catch {}
-    return { id: d.name, name: d.name, icon, custom: true }
+    return { id: d.name, name, icon, custom: true }
   })
 })
 
 const allApps = computed(() => [...builtinApps, ...customApps.value])
 
 function openApp(app) {
-  bus.emit('app.open', { type: app.id })
+  if (app.custom) {
+    // Open as dynamic app
+    const appDir = `/home/user/apps/${app.id}`
+    EventBus.emit('app.open', { type: 'dynamicapp', data: { id: app.id, appDir, title: app.name, icon: app.icon } })
+  } else {
+    EventBus.emit('app.open', { type: app.id })
+  }
 }
 </script>
 

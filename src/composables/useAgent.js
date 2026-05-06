@@ -9,6 +9,7 @@ import { getAgenticCore } from '../lib/agentic.js'
 
 const MAX_MESSAGES = 50
 const SUMMARIZE_THRESHOLD = 24
+const CHAT_STORAGE_KEY = 'fluid-chat'
 
 let _proactiveTimer = null
 let _chatQueue = []
@@ -679,9 +680,42 @@ When finished, call the done tool with a summary.`
     showActivity(`💡 ${text.slice(0, 50)}`)
   }
 
+  // ── Chat persistence ──
+  function saveChat() {
+    try {
+      const data = store.messages.slice(-MAX_MESSAGES)
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(data))
+    } catch {}
+  }
+
+  function loadChat() {
+    try {
+      const raw = localStorage.getItem(CHAT_STORAGE_KEY)
+      if (raw) {
+        const data = JSON.parse(raw)
+        if (Array.isArray(data) && data.length > 0) {
+          store.messages.length = 0
+          store.messages.push(...data)
+          return true
+        }
+      }
+    } catch {}
+    return false
+  }
+
+  function clearChat() {
+    store.messages.length = 0
+    localStorage.removeItem(CHAT_STORAGE_KEY)
+  }
+
+  // Auto-save chat after each message
+  EventBus.on('chat.assistant', () => { setTimeout(saveChat, 100) })
+  EventBus.on('chat.user', () => { setTimeout(saveChat, 100) })
+
   return {
     configure, chat, showActivity, notify,
     startProactiveLoop, stopProactiveLoop, loadSkills,
-    cleanReply, getOsState
+    cleanReply, getOsState,
+    saveChat, loadChat, clearChat
   }
 }

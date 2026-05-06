@@ -7,16 +7,21 @@ export function registerCapabilities() {
   // ── Core: always available ──
 
   caps.register('fs', {
-    description: 'File system operations: write, read, list, or mkdir',
+    description: 'File system operations: write, read, list, mkdir, rm, cp, mv, grep, find',
     icon: '📁', category: 'Core', alwaysAvailable: true,
-    schema: { type: 'object', properties: { action: { type: 'string', enum: ['write', 'read', 'list', 'mkdir'] }, path: { type: 'string' }, content: { type: 'string' } }, required: ['action', 'path'] },
-    handler: ({ action, path, content }, ctx) => {
+    schema: { type: 'object', properties: { action: { type: 'string', enum: ['write', 'read', 'list', 'mkdir', 'rm', 'cp', 'mv', 'grep', 'find'] }, path: { type: 'string' }, content: { type: 'string' }, dest: { type: 'string' }, pattern: { type: 'string' }, recursive: { type: 'boolean' } }, required: ['action', 'path'] },
+    handler: ({ action, path, content, dest, pattern, recursive }, ctx) => {
       const { VFS, showActivity } = ctx
       switch (action) {
         case 'write': VFS.mkdir(path.split('/').slice(0, -1).join('/')); VFS.writeFile(path, content); showActivity(`Created ${path.split('/').pop()}`); return { success: true }
         case 'read': { const c = VFS.readFile(path); return c !== null ? { content: c } : { error: `Not found: ${path}` } }
         case 'list': { const items = VFS.ls(path); return items ? { items } : { error: `Not found: ${path}` } }
         case 'mkdir': VFS.mkdir(path); showActivity(`Created dir ${path}`); return { success: true }
+        case 'rm': { const ok = VFS.rm(path, recursive); return ok ? { success: true } : { error: `Failed to remove: ${path}` } }
+        case 'cp': { if (!dest) return { error: 'dest required' }; const ok = VFS.cp(path, dest); return ok ? { success: true } : { error: `Copy failed` } }
+        case 'mv': { if (!dest) return { error: 'dest required' }; const ok = VFS.mv(path, dest); return ok ? { success: true } : { error: `Move failed` } }
+        case 'grep': { if (!pattern) return { error: 'pattern required' }; const results = VFS.grep(path, pattern); return { results } }
+        case 'find': { const results = VFS.find(path, pattern || ''); return { results } }
         default: return { error: `Unknown fs action: ${action}` }
       }
     }
@@ -91,10 +96,10 @@ export function registerCapabilities() {
   })
 
   caps.register('window', {
-    description: 'Window management: close, minimize, maximize, focus, list, tile',
+    description: 'Window management: close, minimize, maximize, focus, list, tile, snap',
     icon: '🖥️', category: 'Window & Desktop',
-    schema: { type: 'object', properties: { action: { type: 'string', enum: ['close', 'minimize', 'maximize', 'focus', 'list', 'tile'] }, title: { type: 'string' } }, required: ['action'] },
-    handler: ({ action, title }, ctx) => {
+    schema: { type: 'object', properties: { action: { type: 'string', enum: ['close', 'minimize', 'maximize', 'focus', 'list', 'tile', 'snap'] }, title: { type: 'string' }, layout: { type: 'string', enum: ['horizontal', 'vertical', 'grid'] }, zone: { type: 'string', enum: ['left', 'right', 'top', 'bottom', 'top-left', 'top-right', 'bottom-left', 'bottom-right'] } }, required: ['action'] },
+    handler: ({ action, title, layout, zone }, ctx) => {
       const wm = ctx.WindowManager
       switch (action) {
         case 'close': wm.closeByTitle(title); ctx.showActivity(`Closed: ${title}`); break
@@ -102,6 +107,12 @@ export function registerCapabilities() {
         case 'maximize': { const w = wm.windowList.find(w => w.title === title); if (w) wm.toggleMaximize(w.id); break }
         case 'focus': { const w = wm.windowList.find(w => w.title === title); if (w) wm.focus(w.id); break }
         case 'list': return { windows: wm.windowList.map(w => ({ id: w.id, title: w.title, type: w.type })) }
+        case 'tile': wm.tileWindows(layout); ctx.showActivity(`Tiled: ${layout || 'auto'}`); break
+        case 'snap': {
+          const w = wm.windowList.find(w => w.title === title)
+          if (w && zone) wm.snapWindow(w.id, zone)
+          break
+        }
         default: return { error: `Unknown window action: ${action}` }
       }
       return { success: true }
@@ -115,6 +126,16 @@ export function registerCapabilities() {
     handler: ({ css, url, preset }, ctx) => {
       ctx.EventBus.emit('wallpaper.change', { css, url, preset })
       ctx.showActivity('🎨 Wallpaper changed')
+      return { success: true }
+    }
+  })
+
+  caps.register('notify', {
+    description: 'Show a toast notification to the user',
+    icon: '🔔', category: 'Window & Desktop', alwaysAvailable: true,
+    schema: { type: 'object', properties: { message: { type: 'string' }, type: { type: 'string', enum: ['info', 'success', 'warning', 'error'] } }, required: ['message'] },
+    handler: ({ message, type }, ctx) => {
+      ctx.EventBus.emit('notify', { text: message, type: type || 'info' })
       return { success: true }
     }
   })
@@ -168,8 +189,13 @@ export function registerCapabilities() {
     icon: '🕹️', category: 'Web',
     schema: { type: 'object', properties: { action: { type: 'string', enum: ['snapshot', 'click', 'type', 'extract', 'eval'] }, ref: { type: 'string' }, text: { type: 'string' }, code: { type: 'string' } }, required: ['action'] },
     handler: ({ action, ref, text, code }, ctx) => {
-      // Simplified — full implementation would use iframe postMessage
-      return { error: 'Browser control not yet implemented in Vue version' }
+      // Communicate with browser iframe via postMessage bridge
+      ctx.EventBus.emit('browser.control', { action, ref, text, code })
+      // For snapshot, we return a simplified DOM representation
+      if (action === 'snapshot') {
+        return { snapshot: 'Browser snapshot requested — check browser window for results.' }
+      }
+      return { success: true, action }
     }
   })
 

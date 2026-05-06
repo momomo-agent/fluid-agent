@@ -2,16 +2,22 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useWindowsStore } from './stores/windows'
 import { useSettingsStore } from './stores/settings'
+import { useAppRegistryStore } from './stores/appRegistry'
+import { useVFSStore } from './stores/vfs'
 import { useAgent } from './composables/useAgent'
 import { registerCapabilities } from './composables/useCapabilities'
 import { EventBus } from './composables/useEventBus'
+import { initAppBridge } from './composables/useAppBridge'
 import MenuBar from './components/MenuBar.vue'
 import Desktop from './components/Desktop.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import Dock from './components/Dock.vue'
+import ContextMenu from './components/ContextMenu.vue'
+import Notifications from './components/Notifications.vue'
 
 const windows = useWindowsStore()
 const settings = useSettingsStore()
+const appRegistry = useAppRegistryStore()
 const agent = useAgent()
 
 const SIZES = {
@@ -56,6 +62,12 @@ onMounted(() => {
   // Register all capabilities
   registerCapabilities()
 
+  // Initialize app registry
+  appRegistry.init()
+
+  // Initialize app bridge (fluidOS API for iframe apps)
+  initAppBridge()
+
   // Configure agent if settings exist
   if (settings.isConfigured()) {
     agent.configure()
@@ -63,8 +75,14 @@ onMounted(() => {
     agent.startProactiveLoop()
   }
 
-  // Open default window
-  openWindow({ type: 'finder', data: { path: '/home/user/Desktop' } })
+  // Load chat history
+  agent.loadChat()
+
+  // Restore session or open default window
+  const restored = windows.restoreSession()
+  if (!restored) {
+    openWindow({ type: 'finder', data: { path: '/home/user/Desktop' } })
+  }
 
   // If not configured, also open settings
   if (!settings.isConfigured()) {
@@ -74,6 +92,22 @@ onMounted(() => {
   // Listen for window open events
   EventBus.on('app.open', openWindow)
   EventBus.on('window.open', openWindow)
+
+  // Context menu actions
+  window._contextActions = {
+    newFile: () => {
+      const vfs = useVFSStore()
+      vfs.writeFile('/home/user/Desktop/untitled.txt', '')
+      EventBus.emit('notify', { text: 'Created untitled.txt', type: 'success' })
+    },
+    newFolder: () => {
+      const vfs = useVFSStore()
+      vfs.mkdir('/home/user/Desktop/New Folder')
+      EventBus.emit('notify', { text: 'Created New Folder', type: 'success' })
+    },
+    tileWindows: () => windows.tileWindows(),
+    changeWallpaper: () => openWindow({ type: 'settings' }),
+  }
 
   // Keyboard shortcuts
   document.addEventListener('keydown', onGlobalKeydown)
@@ -118,6 +152,8 @@ function onGlobalKeydown(e) {
       <ChatPanel />
     </div>
     <Dock />
+    <ContextMenu />
+    <Notifications />
   </div>
 </template>
 

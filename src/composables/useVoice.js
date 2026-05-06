@@ -39,12 +39,19 @@ export function useVoice() {
 
     let finalTranscript = ''
     recognition.onresult = (e) => {
+      let interim = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript
+        else interim += e.results[i][0].transcript
       }
+      if (interim) EventBus.emit('voice.interim', interim)
     }
     recognition.onend = () => {
-      if (finalTranscript.trim()) onTranscript(finalTranscript.trim())
+      EventBus.emit('voice.interim', '')
+      if (finalTranscript.trim()) {
+        EventBus.emit('voice.final', finalTranscript.trim())
+        onTranscript(finalTranscript.trim())
+      }
       finalTranscript = ''
       listening.value = false
     }

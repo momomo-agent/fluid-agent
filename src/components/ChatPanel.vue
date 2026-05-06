@@ -14,6 +14,7 @@ const input = ref('')
 const chatStream = ref(null)
 const streamingText = ref('')
 const isComposing = ref(false)
+const voiceInterim = ref('')
 
 const isConfigured = computed(() => settings.isConfigured())
 
@@ -28,12 +29,16 @@ onMounted(() => {
   EventBus.on('chat.stream', onStream)
   EventBus.on('chat.assistant', onAssistant)
   EventBus.on('chat.send', onExternalSend)
+  EventBus.on('voice.interim', onVoiceInterim)
+  EventBus.on('voice.final', onVoiceFinal)
 })
 
 onUnmounted(() => {
   EventBus.off('chat.stream', onStream)
   EventBus.off('chat.assistant', onAssistant)
   EventBus.off('chat.send', onExternalSend)
+  EventBus.off('voice.interim', onVoiceInterim)
+  EventBus.off('voice.final', onVoiceFinal)
 })
 
 function onStream(text) {
@@ -50,6 +55,16 @@ function onAssistant(text) {
 }
 
 function onExternalSend(text) {
+  if (text) send(text)
+}
+
+function onVoiceInterim(text) {
+  voiceInterim.value = text
+  nextTick(scrollToBottom)
+}
+
+function onVoiceFinal(text) {
+  voiceInterim.value = ''
   if (text) send(text)
 }
 
@@ -117,6 +132,10 @@ function renderContent(text) {
       <!-- Streaming indicator -->
       <div v-if="streamingText" class="chat-bubble agent streaming">
         <div class="bubble-content" v-html="renderContent(streamingText)" />
+      </div>
+      <!-- Voice interim -->
+      <div v-if="voiceInterim" class="chat-bubble user voice-interim">
+        <div class="bubble-content">🎙️ {{ voiceInterim }}</div>
       </div>
     </div>
     <div class="chat-input-area">
