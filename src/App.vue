@@ -124,14 +124,24 @@ onMounted(() => {
 
   // Keyboard shortcuts
   document.addEventListener('keydown', onGlobalKeydown)
+
+  // Reflow windows on browser resize
+  window.addEventListener('resize', onWindowResize)
 })
 
 onUnmounted(() => {
   EventBus.off('app.open', openWindow)
   EventBus.off('window.open', openWindow)
   document.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('resize', onWindowResize)
   agent.stopProactiveLoop()
 })
+
+let _resizeTimer = null
+function onWindowResize() {
+  clearTimeout(_resizeTimer)
+  _resizeTimer = setTimeout(() => windows.reflow(), 100)
+}
 
 function onGlobalKeydown(e) {
   // Cmd/Ctrl+Space → Spotlight

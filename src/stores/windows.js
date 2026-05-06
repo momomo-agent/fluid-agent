@@ -238,6 +238,22 @@ export const useWindowsStore = defineStore('windows', () => {
     win.nh = win.height / h
   }
 
+  function reflow() {
+    const { w, h } = _getArea()
+    for (const win of windows.value.values()) {
+      if (win.maximized) continue
+      win.x = Math.round(win.nx * w)
+      win.y = Math.round(win.ny * h)
+      win.width = Math.round(win.nw * w)
+      win.height = Math.round(win.nh * h)
+      // Clamp to viewport
+      if (win.x + win.width > w) win.x = Math.max(0, w - win.width)
+      if (win.y + win.height > h) win.y = Math.max(0, h - win.height)
+      if (win.width > w) win.width = w
+      if (win.height > h) win.height = h
+    }
+  }
+
   // Smart positioning: random sampling to minimize overlap (from legacy)
   function _findPosition(ww, wh) {
     const { w, h } = _getArea()
@@ -267,7 +283,7 @@ export const useWindowsStore = defineStore('windows', () => {
     windows, focusedId, windowList, focusedWindow,
     create, close, focus, minimize, toggleMaximize,
     move, resize, findByType, closeByTitle,
-    tileWindows, snapWindow,
+    tileWindows, snapWindow, reflow,
     restoreSession, clearSession
   }
 })
