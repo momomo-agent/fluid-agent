@@ -8,17 +8,255 @@ const MAX_RETRIES = 2
 const MAX_TURN_BUDGET = 30
 const MAX_TOKEN_BUDGET = 200000
 const TURN_QUANTUM = 10
+const STALL_THRESHOLD = 5
+const GC_KEEP_MS = 7 * 86400_000 // 7 days
 
 export const useDispatcherStore = defineStore('dispatcher', () => {
   const pending = ref([])
   const slots = ref(new Map())
   const completed = ref([])
   const decisionLog = ref([])
+  const workers = ref(new Map()) // workerId → worker state
   let nextTaskId = 1
+  let _dispatchMode = 'code' // 'code' | 'llm'
+  let _ai = null
 
   const PROC_DIR = '/proc/scheduler'
+  const WORKERS_DIR = '/proc/workers'
 
-  // ── Scheduler ──
+  // ═══════════════════════════════════════════════════════════════
+  // Dispatch Mode
+  // ═══════════════════════════════════════════════════════════════
+
+  function setDispatchMode(mode) {
+    if (mode === 'code' || mode === 'llm') _dispatchMode = mode
+  }
+
+  function getDispatchMode() { return _dispatchMode }
+
+  function setAI(ai) { _ai = ai }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Worker Lifecycle
+  // ═══════════════════════════════════════════════════════════════
+
+  function registerWorker(workerId, task, steps) {
+    workers.value.set(workerId, {
+      id: workerId,
+      task,
+      steps: steps || [],
+      completedSteps: [],
+      status: 'running',
+      turnCount: 0,
+      totalTokens: 0,
+      toolCallCount: 0,
+      stallCount: 0,
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      error: null,
+    })
+    _saveWorker(workerId)
+    _logDecision(workerId, 'start', `Started: ${task.slice(0, 60)}`)
+  }
+
+  function updateWorker(workerId, updates) {
+    const w = workers.value.get(workerId)
+    if (!w) return
+    Object.assign(w, updates)
+    w.updatedAt = Date.now()
+    _saveWorker(workerId)
+  }
+
+  function removeWorker(workerId) {
+    workers.value.delete(workerId)
+  }
+
+  function getWorker(id) {
+    return workers.value.get(id)
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // beforeTurn / afterTurn hooks
+  // ═══════════════════════════════════════════════════════════════
+
+  function beforeTurn(workerId) {
+    const w = workers.value.get(workerId)
+    if (!w) return { action: 'continue' }
+    w.turnCount = (w.turnCount || 0) + 1
+    w.updatedAt = Date.now()
+
+    // Budget check
+    if (w.turnCount > MAX_TURN_BUDGET) {
+      _logDecision(workerId, 'abort', `Max turns (${MAX_TURN_BUDGET}) exceeded`)
+      return { action: 'abort', reason: `Maximum turns (${MAX_TURN_BUDGET}) reached` }
+    }
+    return { action: 'continue' }
+  }
+
+  function afterTurn(workerId, turnResult = {}) {
+    const w = workers.value.get(workerId)
+    if (!w) return { action: 'continue' }
+
+    // Track tokens
+    const turnTokens = turnResult?.usage
+      ? (turnResult.usage.input_tokens || 0) + (turnResult.usage.output_tokens || 0)
+      : 0
+    if (turnTokens) w.totalTokens = (w.totalTokens || 0) + turnTokens
+    if (turnResult?.toolCalls) w.toolCallCount = (w.toolCallCount || 0) + turnResult.toolCalls.length
+
+    // Stall detection
+    if (turnResult?.noProgress) {
+      w.stallCount = (w.stallCount || 0) + 1
+      if (w.stallCount >= STALL_THRESHOLD) {
+        _logDecision(workerId, 'stall', `Stalled ${w.stallCount} turns`)
+      }
+    } else {
+      w.stallCount = 0
+    }
+
+    // Token budget
+    if (w.totalTokens >= MAX_TOKEN_BUDGET) {
+      _logDecision(workerId, 'suspend', 'Token budget exceeded')
+      return { action: 'suspend', reason: 'token_budget' }
+    }
+
+    // Round-robin preemption
+    if (w.turnCount % TURN_QUANTUM === 0 && pending.value.length > 0) {
+      const slot = [...slots.value.values()].find(s => s.id === w.task)
+      const higherPriority = pending.value.find(t => slot && t.priority < slot.priority)
+      if (higherPriority) {
+        return { action: 'suspend', reason: 'preempted' }
+      }
+    }
+
+    _saveWorker(workerId)
+    return { action: 'continue' }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // LLM Dispatch Mode
+  // ═══════════════════════════════════════════════════════════════
+
+  async function handleIntentLLM(action, intent, allIntents) {
+    if (!_ai) {
+      console.warn('[Dispatcher] LLM mode but no AI instance, falling back to code')
+      _dispatchMode = 'code'
+      return null
+    }
+
+    const activeWorkers = [...workers.value.values()].filter(w => w.status === 'running' || w.status === 'suspended')
+    const freeSlots = MAX_SLOTS - activeWorkers.filter(w => w.status === 'running').length
+
+    const prompt = `You are a task dispatcher. Given the current state, decide what to do.
+
+Event: ${action} intent ${intent.id} "${intent.goal}"
+
+All intents:\n${(allIntents || []).map(i => `- ${i.id}: "${i.goal}" (${i.status})${i.dependsOn?.length ? ' depends:' + i.dependsOn.join(',') : ''}`).join('\n')}
+
+Active workers:\n${activeWorkers.map(w => `- Worker #${w.id}: "${w.task.slice(0, 60)}" (turn ${w.turnCount})`).join('\n') || 'none'}
+
+Free slots: ${freeSlots}
+
+Respond with JSON: {"ops": [{"type": "spawn"|"steer"|"cancel"|"wait", "intentId": "...", "reason": "..."}]}`
+
+    try {
+      const resp = await _ai.think(prompt, { stream: false, system: 'You are a task scheduler. Respond with JSON only.' })
+      const text = resp?.content || resp?.text || (typeof resp === 'string' ? resp : '')
+      const match = text.match(/\{[\s\S]*\}/)
+      if (match) {
+        const decision = JSON.parse(match[0])
+        _logDecision(null, 'llm-dispatch', JSON.stringify(decision.ops || []))
+        return decision
+      }
+    } catch (e) {
+      console.error('[Dispatcher] LLM dispatch failed:', e.message)
+      _dispatchMode = 'code'
+    }
+    return null
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Resume
+  // ═══════════════════════════════════════════════════════════════
+
+  function checkForResume() {
+    const suspended = [...workers.value.values()].filter(w => w.status === 'suspended')
+    return suspended.map(w => ({
+      workerId: w.id,
+      task: w.task,
+      turnCount: w.turnCount,
+      updatedAt: w.updatedAt,
+    }))
+  }
+
+  function resumeWorker(workerId) {
+    const w = workers.value.get(workerId)
+    if (!w || w.status !== 'suspended') return null
+    w.status = 'running'
+    w.updatedAt = Date.now()
+    _saveWorker(workerId)
+    return {
+      task: w.task,
+      steps: w.steps,
+      completedSteps: w.completedSteps,
+      messages: w.messages,
+      turnCount: w.turnCount,
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // formatForTalker
+  // ═══════════════════════════════════════════════════════════════
+
+  function formatForTalker() {
+    const active = [...workers.value.values()].filter(w => w.status === 'running' || w.status === 'suspended')
+    if (active.length === 0) return ''
+    let out = '\n## Active Workers\n'
+    for (const w of active) {
+      out += `- Worker #${w.id}: "${w.task.slice(0, 60)}" (${w.status}, turn ${w.turnCount})\n`
+    }
+    return out
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // GC: clean up old done/failed workers
+  // ═══════════════════════════════════════════════════════════════
+
+  function gc(keepMs = GC_KEEP_MS) {
+    const vfs = useVFSStore()
+    const cutoff = Date.now() - keepMs
+
+    // Clean worker state
+    for (const [id, w] of workers.value) {
+      if ((w.status === 'done' || w.status === 'failed' || w.status === 'cancelled') && w.updatedAt < cutoff) {
+        workers.value.delete(id)
+      }
+    }
+
+    // Clean VFS worker files
+    if (vfs.isDir(WORKERS_DIR)) {
+      const entries = vfs.ls(WORKERS_DIR) || []
+      for (const entry of entries) {
+        if (entry.name === 'meta.json' || !entry.name.endsWith('.json')) continue
+        try {
+          const data = JSON.parse(vfs.readFile(`${WORKERS_DIR}/${entry.name}`))
+          if ((data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') && data.updatedAt < cutoff) {
+            vfs.rm(`${WORKERS_DIR}/${entry.name}`)
+          }
+        } catch { /* skip corrupt */ }
+      }
+    }
+
+    // Clean old completed entries
+    const cutoffCompleted = completed.value.filter(c => !c.completedAt || c.completedAt > cutoff)
+    completed.value.length = 0
+    completed.value.push(...cutoffCompleted)
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Scheduler
+  // ═══════════════════════════════════════════════════════════════
 
   function enqueue(task, { priority = 5, dependsOn = [], steps = [], meta = {} } = {}) {
     const id = `task-${nextTaskId++}`
@@ -179,6 +417,32 @@ export const useDispatcherStore = defineStore('dispatcher', () => {
     }, null, 2))
   }
 
+  function _saveWorker(workerId) {
+    const vfs = useVFSStore()
+    if (!vfs.isDir(WORKERS_DIR)) vfs.mkdir(WORKERS_DIR)
+    const w = workers.value.get(workerId)
+    if (!w) return
+    vfs.writeFile(`${WORKERS_DIR}/${workerId}.json`, JSON.stringify({
+      id: w.id,
+      task: w.task,
+      status: w.status,
+      steps: w.steps || [],
+      completedSteps: w.completedSteps || [],
+      turnCount: w.turnCount || 0,
+      messages: (w.messages || []).slice(-20),
+      createdAt: w.createdAt || Date.now(),
+      updatedAt: w.updatedAt || Date.now(),
+      totalTokens: w.totalTokens || 0,
+      toolCallCount: w.toolCallCount || 0,
+      error: w.error || null,
+    }, null, 2))
+  }
+
+  function _logDecision(workerId, type, detail) {
+    decisionLog.value.push({ workerId, type, detail, at: Date.now() })
+    if (decisionLog.value.length > 50) decisionLog.value.shift()
+  }
+
   function restore() {
     const vfs = useVFSStore()
     if (!vfs.isFile(`${PROC_DIR}/state.json`)) return
@@ -208,9 +472,19 @@ export const useDispatcherStore = defineStore('dispatcher', () => {
   }
 
   return {
-    pending, slots, completed, decisionLog,
+    pending, slots, completed, decisionLog, workers,
     enqueue, cancel, getState, isIdle,
     completeSlot, failSlot, suspendSlot, recordTurn,
-    restore
+    restore,
+    // Worker lifecycle
+    registerWorker, updateWorker, removeWorker, getWorker,
+    // Turn hooks
+    beforeTurn, afterTurn,
+    // LLM dispatch
+    setDispatchMode, getDispatchMode, setAI, handleIntentLLM,
+    // Resume
+    checkForResume, resumeWorker,
+    // State
+    formatForTalker, gc,
   }
 })

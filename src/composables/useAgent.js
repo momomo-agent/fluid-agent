@@ -245,6 +245,7 @@ Be natural, concise, and have personality.`
     }
 
     let fullReply = ''
+    showActivity('Thinking...')
 
     try {
       const os = getOsState()
@@ -315,6 +316,9 @@ Be natural, concise, and have personality.`
 
       const displayText = _streamAction?.reply || cleanReply(fullReply)
       EventBus.emit('chat.assistant', displayText)
+
+      // Auto-memory: judge if this exchange is worth remembering
+      autoMemory(userMessage, fullReply)
 
     } catch (err) {
       EventBus.emit('chat.assistant', `Error: ${err.message}`)
@@ -486,6 +490,8 @@ When finished, call the done tool with a summary.`
           for (const tc of turn.toolCalls) {
             if (abort.signal.aborted) throw new Error('aborted')
             task.log.push(`${tc.name}: ${JSON.stringify(tc.input).slice(0, 60)}`)
+            EventBus.emit('tool.call', { name: tc.name, input: JSON.stringify(tc.input).slice(0, 80) })
+            showActivity(`🔧 ${tc.name}`)
             const handler = toolHandlers[tc.name]
             capabilities.recordUse(tc.name)
             const result = handler ? await handler(tc.input) : { error: `Unknown tool: ${tc.name}` }
@@ -680,6 +686,50 @@ When finished, call the done tool with a summary.`
     showActivity(`💡 ${text.slice(0, 50)}`)
   }
 
+  // ── Auto Memory ──
+  async function autoMemory(userMsg, agentReply) {
+    if (!store.ai) return
+    try {
+      const memPath = '/system/memory/MEMORY.md'
+      const currentMem = vfs.isFile(memPath) ? vfs.readFile(memPath) : ''
+      const resp = await store.ai.think(
+        `User said: "${userMsg.slice(0, 300)}"\nYou replied: "${agentReply.slice(0, 300)}"\n\nCurrent memory:\n${currentMem.slice(0, 500)}`,
+        {
+          system: `You are the memory system of Fluid Agent OS. Decide if this exchange contains something worth remembering long-term: user preferences, facts about the user, project context, important decisions, or lessons learned.\n\nRespond with JSON only:\n{"remember": false}\nor\n{"remember": true, "section": "About You|Preferences|Projects|Lessons Learned", "entry": "concise fact to remember"}\n\nBe selective. Only remember genuinely useful facts. Don't remember greetings, small talk, or transient requests.`,
+          stream: false,
+        }
+      )
+      const text = resp?.content || resp?.text || (typeof resp === 'string' ? resp : '')
+      const jsonMatch = text.match(/\{[\s\S]*?\}/)
+      if (!jsonMatch) return
+      const decision = JSON.parse(jsonMatch[0])
+      if (!decision.remember || !decision.entry) return
+
+      let mem = vfs.isFile(memPath) ? vfs.readFile(memPath) : '# Agent Memory\n'
+      const section = decision.section || 'Lessons Learned'
+      const header = `## ${section}`
+      if (mem.includes(header)) {
+        mem = mem.replace(header, `${header}\n- ${decision.entry}`)
+      } else {
+        mem += `\n${header}\n- ${decision.entry}\n`
+      }
+      vfs.writeFile(memPath, mem)
+      showActivity('💾 Memory updated')
+    } catch (e) { /* silent fail */ }
+  }
+
+  // ── Resume Task ──
+  function resumeTask(workerId) {
+    if (!store.conductor) return null
+    const ok = store.conductor.resumeWorker(workerId)
+    if (!ok) {
+      console.warn('[resumeTask] No suspended worker found for', workerId)
+      return null
+    }
+    console.log(`[resumeTask] Resumed worker ${workerId}`)
+    return true
+  }
+
   // ── Chat persistence ──
   function saveChat() {
     try {
@@ -715,7 +765,7 @@ When finished, call the done tool with a summary.`
   return {
     configure, chat, showActivity, notify,
     startProactiveLoop, stopProactiveLoop, loadSkills,
-    cleanReply, getOsState,
+    cleanReply, getOsState, resumeTask,
     saveChat, loadChat, clearChat
   }
 }
