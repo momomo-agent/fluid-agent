@@ -233,6 +233,16 @@ Be natural, concise, and have personality.`
     store.messages.push({ role: 'user', content: userMessage })
     EventBus.emit('chat.user', userMessage)
 
+    if (!store.ai) {
+      // Auto-configure if settings exist but ai not initialized
+      const settings = useSettingsStore()
+      if (settings.isConfigured()) configure()
+      if (!store.ai) {
+        EventBus.emit('chat.assistant', 'Please configure your API key in Settings first.')
+        return
+      }
+    }
+
     let fullReply = ''
 
     try {
@@ -410,6 +420,14 @@ Be natural, concise, and have personality.`
 
     const workerSystem = `You are the execution engine of Fluid Agent OS. Execute the given task using tools.
 CRITICAL: You MUST use tools to complete tasks. NEVER answer with just text.
+
+Filesystem layout:
+- Home directory: /home/user
+- Desktop: /home/user/Desktop
+- Documents: /home/user/Documents
+- Downloads: /home/user/Downloads
+- System: /system (memory, skills, tools)
+- Temp: /tmp
 
 Current OS state:
 - Open windows: ${os.windows}

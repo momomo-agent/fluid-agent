@@ -14,18 +14,19 @@ function getShell() {
 
   const vfsAdapter = {
     async read(path) {
+      if (vfs.isDir(path)) return { error: 'EISDIR', content: undefined }
       const c = vfs.readFile(path)
       if (c === null) throw new Error(`ENOENT: ${path}`)
-      return c
+      return { content: c }
     },
     async write(path, content) {
       vfs.mkdir(path.split('/').slice(0, -1).join('/') || '/')
       vfs.writeFile(path, content)
     },
     async ls(path) {
+      if (!vfs.isDir(path)) throw new Error(`ENOENT: ${path}`)
       const items = vfs.ls(path)
-      if (!items) return []
-      return items.map(f => ({ name: f.name, type: f.type, size: f.type === 'file' ? (f.content?.length || 0) : 0 }))
+      return (items || []).map(f => ({ name: f.name, type: f.type, size: f.type === 'file' ? (f.content?.length || 0) : 0 }))
     },
     async delete(path) { vfs.rm(path) },
     async mkdir(path) { vfs.mkdir(path) },
@@ -46,7 +47,9 @@ function getShell() {
   }
 
   _shell = AgenticShellBrowser.createBrowserShell(vfsAdapter)
-  _shell.exec('cd /home/user').catch(() => {})
+  // Set initial cwd synchronously (cd is async but cwd is a direct property)
+  _shell.cwd = '/home/user'
+  if (_shell.env?.set) _shell.env.set('PWD', '/home/user')
   return _shell
 }
 
