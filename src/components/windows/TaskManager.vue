@@ -1,9 +1,11 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAgentStore } from '../../stores/agent'
+import { useDispatcherStore } from '../../stores/dispatcher'
 import { useEventBus } from '../../composables/useEventBus'
 
 const agentStore = useAgentStore()
+const dispatcher = useDispatcherStore()
 const bus = useEventBus()
 const activeTab = ref('tasks')
 
@@ -31,6 +33,22 @@ function formatElapsed(ms) {
   return `${Math.floor(m / 60)}h ago`
 }
 
+// Conductor tab data
+const conductorIntents = computed(() => {
+  if (!agentStore.conductor) return []
+  try {
+    const all = agentStore.conductor._intentState?.getAll() || []
+    return all
+  } catch { return [] }
+})
+
+const conductorWorkers = computed(() => {
+  return [...dispatcher.workers.values()]
+})
+
+const runningWorkers = computed(() => conductorWorkers.value.filter(w => w.status === 'running'))
+const suspendedConductorWorkers = computed(() => conductorWorkers.value.filter(w => w.status === 'suspended'))
+
 // Auto-refresh
 let refreshTimer = null
 const tick = ref(0)
@@ -45,6 +63,7 @@ onUnmounted(() => clearInterval(refreshTimer))
       <button class="tm-tab" :class="{ active: activeTab === 'log' }" @click="activeTab = 'log'">
         Log{{ selected?.log?.length ? ` · ${selected.log.length}` : '' }}
       </button>
+      <button class="tm-tab" :class="{ active: activeTab === 'conductor' }" @click="activeTab = 'conductor'">Conductor</button>
     </div>
 
     <!-- Tasks view -->
@@ -85,6 +104,36 @@ onUnmounted(() => clearInterval(refreshTimer))
         <div v-else class="tm-empty">No logs yet</div>
       </div>
     </div>
+
+    <!-- Conductor view -->
+    <div v-if="activeTab === 'conductor'" class="tm-conductor-view" :key="tick">
+      <div class="tm-conductor-section">
+        <div class="tm-conductor-heading">Intents</div>
+        <div v-if="conductorIntents.length === 0" class="tm-empty">No active intents</div>
+        <div v-for="intent in conductorIntents" :key="intent.id" class="tm-conductor-item">
+          <span class="tm-status-dot" :class="intent.status" />
+          <span class="tm-conductor-goal">{{ intent.goal?.slice(0, 50) }}</span>
+          <span class="tm-conductor-status">{{ intent.status }}</span>
+        </div>
+      </div>
+      <div class="tm-conductor-section">
+        <div class="tm-conductor-heading">Workers (Running)</div>
+        <div v-if="runningWorkers.length === 0" class="tm-empty">No running workers</div>
+        <div v-for="w in runningWorkers" :key="w.id" class="tm-conductor-item">
+          <span class="tm-status-dot running" />
+          <span class="tm-conductor-goal">#{{ w.id }} {{ w.task?.slice(0, 40) }}</span>
+          <span class="tm-conductor-meta">turn {{ w.turnCount }} · {{ w.totalTokens || 0 }} tok</span>
+        </div>
+      </div>
+      <div v-if="suspendedConductorWorkers.length" class="tm-conductor-section">
+        <div class="tm-conductor-heading">Suspended</div>
+        <div v-for="w in suspendedConductorWorkers" :key="w.id" class="tm-conductor-item">
+          <span class="tm-status-dot suspended" />
+          <span class="tm-conductor-goal">#{{ w.id }} {{ w.task?.slice(0, 40) }}</span>
+          <span class="tm-conductor-meta">turn {{ w.turnCount }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -117,4 +166,16 @@ onUnmounted(() => clearInterval(refreshTimer))
 .tm-log-entry { display: flex; gap: 8px; padding: 3px 4px; font-size: 11px; font-family: monospace; }
 .tm-log-idx { color: var(--text-muted); width: 24px; text-align: right; flex-shrink: 0; }
 .tm-log-text { color: var(--text-secondary); }
+.tm-conductor-view { flex: 1; overflow-y: auto; padding: 8px 12px; }
+.tm-conductor-section { margin-bottom: 12px; }
+.tm-conductor-heading { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.tm-conductor-item { display: flex; align-items: center; gap: 6px; padding: 5px 0; font-size: 12px; }
+.tm-conductor-item .tm-status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
+.tm-conductor-item .tm-status-dot.running, .tm-conductor-item .tm-status-dot.active { background: #60a5fa; }
+.tm-conductor-item .tm-status-dot.done, .tm-conductor-item .tm-status-dot.completed { background: #34d399; }
+.tm-conductor-item .tm-status-dot.failed, .tm-conductor-item .tm-status-dot.error { background: #f87171; }
+.tm-conductor-item .tm-status-dot.suspended, .tm-conductor-item .tm-status-dot.pending { background: #fbbf24; }
+.tm-conductor-goal { color: var(--text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-conductor-status { font-size: 10px; color: var(--text-muted); }
+.tm-conductor-meta { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
 </style>

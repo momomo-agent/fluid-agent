@@ -4,6 +4,7 @@ import { useWindowsStore } from './stores/windows'
 import { useSettingsStore } from './stores/settings'
 import { useAppRegistryStore } from './stores/appRegistry'
 import { useVFSStore } from './stores/vfs'
+import { useDispatcherStore } from './stores/dispatcher'
 import { useAgent } from './composables/useAgent'
 import { registerCapabilities } from './composables/useCapabilities'
 import { EventBus } from './composables/useEventBus'
@@ -18,6 +19,7 @@ import Notifications from './components/Notifications.vue'
 const windows = useWindowsStore()
 const settings = useSettingsStore()
 const appRegistry = useAppRegistryStore()
+const dispatcher = useDispatcherStore()
 const agent = useAgent()
 
 const SIZES = {
@@ -73,6 +75,17 @@ onMounted(() => {
     agent.configure()
     agent.loadSkills()
     agent.startProactiveLoop()
+
+    // Crash recovery: check for suspended/interrupted tasks
+    dispatcher.restore()
+    const resumable = dispatcher.checkForResume()
+    if (resumable.length > 0) {
+      const taskNames = resumable.map(r => r.task.slice(0, 40)).join(', ')
+      EventBus.emit('chat.resume', {
+        tasks: resumable,
+        message: `Found ${resumable.length} unfinished task${resumable.length > 1 ? 's' : ''}: ${taskNames}`
+      })
+    }
   }
 
   // Load chat history

@@ -32,6 +32,7 @@ onMounted(() => {
   EventBus.on('chat.stream', onStream)
   EventBus.on('chat.assistant', onAssistant)
   EventBus.on('chat.send', onExternalSend)
+  EventBus.on('chat.resume', onResume)
   EventBus.on('voice.interim', onVoiceInterim)
   EventBus.on('voice.final', onVoiceFinal)
   EventBus.on('activity', onActivity)
@@ -42,6 +43,7 @@ onUnmounted(() => {
   EventBus.off('chat.stream', onStream)
   EventBus.off('chat.assistant', onAssistant)
   EventBus.off('chat.send', onExternalSend)
+  EventBus.off('chat.resume', onResume)
   EventBus.off('voice.interim', onVoiceInterim)
   EventBus.off('voice.final', onVoiceFinal)
   EventBus.off('activity', onActivity)
@@ -84,6 +86,29 @@ function onExternalSend(text) {
   if (text) send(text)
 }
 
+function onResume(data) {
+  messages.value.push({
+    role: 'system',
+    content: data.message,
+    resumeTasks: data.tasks
+  })
+  nextTick(scrollToBottom)
+}
+
+function resumeTask(workerId) {
+  agent.resumeTask(workerId)
+  // Remove the resume message
+  const idx = messages.value.findIndex(m => m.resumeTasks)
+  if (idx >= 0) messages.value.splice(idx, 1)
+  messages.value.push({ role: 'assistant', content: 'Resuming task...' })
+  nextTick(scrollToBottom)
+}
+
+function dismissResume() {
+  const idx = messages.value.findIndex(m => m.resumeTasks)
+  if (idx >= 0) messages.value.splice(idx, 1)
+}
+
 function onVoiceInterim(text) {
   voiceInterim.value = text
   nextTick(scrollToBottom)
@@ -124,6 +149,12 @@ function handleKeydown(e) {
     e.preventDefault()
     send()
   }
+}
+
+function autoResize(e) {
+  const el = e.target
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px'
 }
 
 // ── Markdown rendering (migrated from legacy) ──
@@ -249,9 +280,21 @@ function renderContent(text) {
         v-for="(msg, i) in messages"
         :key="i"
         class="chat-bubble"
-        :class="msg.role === 'user' ? 'user' : 'agent'"
+        :class="[msg.role === 'user' ? 'user' : msg.role === 'system' ? 'system' : 'agent']"
       >
-        <div class="bubble-content" v-html="renderContent(msg.content)" />
+        <!-- Resume prompt -->
+        <template v-if="msg.resumeTasks">
+          <div class="bubble-content">{{ msg.content }}</div>
+          <div class="resume-actions">
+            <button v-for="t in msg.resumeTasks" :key="t.workerId" class="resume-btn" @click="resumeTask(t.workerId)">
+              ▶ Resume
+            </button>
+            <button class="dismiss-btn" @click="dismissResume()">Dismiss</button>
+          </div>
+        </template>
+        <template v-else>
+          <div class="bubble-content" v-html="renderContent(msg.content)" />
+        </template>
         <!-- Tool calls (collapsible) -->
         <div v-if="msg.toolCalls && msg.toolCalls.length" class="tool-calls-section">
           <button class="tool-calls-toggle" @click="toggleToolCalls(i)">
@@ -293,6 +336,7 @@ function renderContent(text) {
         placeholder="Ask anything..."
         rows="1"
         @keydown="handleKeydown"
+        @input="autoResize"
         @compositionstart="isComposing = true"
         @compositionend="isComposing = false"
       />
@@ -406,5 +450,42 @@ function renderContent(text) {
 }
 .tool-progress {
   opacity: 0.7;
+}
+.chat-bubble.system {
+  align-self: center;
+  background: rgba(250, 204, 21, 0.1);
+  border: 1px solid rgba(250, 204, 21, 0.2);
+  border-radius: 10px;
+  padding: 8px 12px;
+  max-width: 90%;
+}
+.resume-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.resume-btn {
+  background: rgba(96, 165, 250, 0.2);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  border-radius: 6px;
+  color: #60a5fa;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.resume-btn:hover {
+  background: rgba(96, 165, 250, 0.3);
+}
+.dismiss-btn {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: var(--text-muted);
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dismiss-btn:hover {
+  background: rgba(255,255,255,0.05);
 }
 </style>

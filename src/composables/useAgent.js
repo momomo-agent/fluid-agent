@@ -619,10 +619,52 @@ When finished, call the done tool with a summary.`
     if (_proactiveTimer) return
     _proactiveTimer = setInterval(async () => {
       if (!store.ai || !store.proactiveEnabled) return
-      if (Date.now() - store.lastUserMessage < 120000) return
-      if (Date.now() - store.lastProactive < 300000) return
+      const idleTime = Date.now() - store.lastUserMessage
+      if (idleTime < 120000) return // User active within 2 min
+      if (Date.now() - store.lastProactive < 300000) return // Cooldown 5 min
       if (store.conductor && !store.conductor._scheduler.isIdle()) return
-      // Proactive check omitted for brevity — same logic as legacy
+
+      // Detect signals
+      const signals = []
+
+      // Check VFS changes
+      const desktopFiles = vfs.ls('/home/user/Desktop') || []
+      const docFiles = vfs.ls('/home/user/Documents') || []
+      const totalFiles = desktopFiles.length + docFiles.length
+      if (totalFiles > 0 && !store._lastFileCount) store._lastFileCount = totalFiles
+      if (store._lastFileCount && totalFiles !== store._lastFileCount) {
+        signals.push('filesystem_change')
+      }
+      store._lastFileCount = totalFiles
+
+      // Idle signal
+      if (idleTime > 300000) signals.push('idle')
+
+      // Error signal: check if last task failed
+      if (store.taskHistory.length > 0 && store.taskHistory[0].status === 'error') {
+        signals.push('error')
+      }
+
+      // Rapid switch: multiple tasks in short time
+      const recentTasks = store.taskHistory.filter(t => Date.now() - t.startTime < 300000)
+      if (recentTasks.length >= 3) signals.push('rapid_switch')
+
+      if (signals.length === 0) return
+
+      store.lastProactive = Date.now()
+
+      try {
+        const os = getOsState()
+        const resp = await store.ai.think(
+          `[PROACTIVE] User has been idle for ${Math.floor(idleTime / 1000)}s. Signals: ${signals.join(', ')}. OS state: ${JSON.stringify(os)}. Offer a brief, helpful suggestion or observation if appropriate. Keep it to one sentence. If nothing useful to say, respond with just "[SKIP]".`,
+          { system: 'You are Fluid Agent in proactive mode. Be helpful but not annoying. One sentence max.', stream: false }
+        )
+        const text = resp?.content || resp?.text || (typeof resp === 'string' ? resp : '')
+        if (text && !text.includes('[SKIP]')) {
+          EventBus.emit('chat.assistant', `💡 ${text.trim()}`)
+          store.messages.push({ role: 'assistant', content: `💡 ${text.trim()}` })
+        }
+      } catch {}
     }, 120000)
   }
 
