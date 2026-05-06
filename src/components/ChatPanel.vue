@@ -14,6 +14,7 @@ const input = ref('')
 const chatStream = ref(null)
 const streamingText = ref('')
 const isComposing = ref(false)
+const isListening = ref(false)
 const voiceInterim = ref('')
 
 const isConfigured = computed(() => settings.isConfigured())
@@ -157,6 +158,20 @@ function autoResize(e) {
   el.style.height = Math.min(el.scrollHeight, 120) + 'px'
 }
 
+function clearChat() {
+  messages.value = [{ role: 'assistant', content: "Chat cleared. How can I help?" }]
+  agent.clearChat()
+}
+
+function toggleVoice() {
+  isListening.value = !isListening.value
+  if (isListening.value) {
+    EventBus.emit('voice.startListening')
+  } else {
+    EventBus.emit('voice.stopListening')
+  }
+}
+
 // ── Markdown rendering (migrated from legacy) ──
 
 function _inlineMarkdown(text) {
@@ -273,6 +288,10 @@ function renderContent(text) {
   <div id="chat-panel">
     <div class="chat-header">
       <span class="chat-title">Chat</span>
+      <div class="chat-header-actions">
+        <button v-if="messages.length > 1" class="clear-btn" title="Clear chat" @click="clearChat">🗑️</button>
+        <button v-if="settings.voiceEnabled" class="voice-btn" :class="{ active: isListening }" title="Voice input" @click="toggleVoice">🎙️</button>
+      </div>
       <span v-if="!isConfigured" class="chat-status">⚠ Not configured</span>
     </div>
     <div ref="chatStream" class="chat-stream">
@@ -488,4 +507,9 @@ function renderContent(text) {
 .dismiss-btn:hover {
   background: rgba(255,255,255,0.05);
 }
+.chat-header-actions { display: flex; gap: 4px; margin-left: auto; }
+.clear-btn, .voice-btn { background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 4px; opacity: 0.6; }
+.clear-btn:hover, .voice-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+.voice-btn.active { opacity: 1; background: rgba(248,113,113,0.2); animation: pulse-voice 1.5s infinite; }
+@keyframes pulse-voice { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
 </style>
