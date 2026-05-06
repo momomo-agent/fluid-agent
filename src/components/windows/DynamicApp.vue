@@ -348,4 +348,7 @@ onUnmounted(() => {
 .dapp-table td { padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.04); color: #d0d0d0; }
 .dapp-table tr:hover td { background: rgba(255,255,255,0.02); }
 .dapp-empty { text-align: center; padding: 40px; color: #666; font-style: italic; }
+.dapp-markdown { font-size: 14px; line-height: 1.7; color: #d0d0d0; padding: 4px 0; white-space: pre-wrap; }
+.dapp-list { display: flex; flex-direction: column; gap: 4px; }
+.dapp-list-item { padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); font-size: 14px; color: #d0d0d0; }
 </style>

@@ -297,6 +297,195 @@ export function registerCapabilities() {
     }
   })
 
+  // ── Extended Capabilities (lazy-loaded via search_tools) ──
+
+  caps.register('search_music', {
+    description: 'Search for songs. Returns track name, artist, album, artwork, and playable/preview URLs. For Chinese songs uses NetEase (full MP3), for international uses iTunes (30s preview). After getting results, use the music tool with action "add_and_play" to play.',
+    icon: '🎵', category: 'Media',
+    schema: { type: 'object', properties: { query: { type: 'string', description: 'Song, artist, or album name' }, source: { type: 'string', enum: ['auto', 'netease', 'itunes'], description: 'Music source' }, limit: { type: 'number' } }, required: ['query'] },
+    handler: async ({ query, source, limit }, ctx) => {
+      ctx.showActivity(`🎵 Searching: ${query}`)
+      const isChinese = /[\u4e00-\u9fff]/.test(query)
+      const src = source || 'auto'
+      const maxResults = Math.min(limit || 5, 20)
+
+      async function searchNetease() {
+        const url = `https://music.163.com/api/cloudsearch/pc?s=${encodeURIComponent(query)}&type=1&limit=${maxResults}&offset=0`
+        const res = await fetch(`https://proxy.link2web.site`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, method: 'GET', mode: 'raw' }) })
+        const proxy = await res.json()
+        const data = typeof proxy.body === 'string' ? JSON.parse(proxy.body) : proxy.body
+        const songs = data?.result?.songs
+        if (!songs?.length) return null
+        return songs.map(s => {
+          const dur = Math.round((s.dt || 0) / 1000), min = Math.floor(dur / 60), sec = dur % 60
+          return { track: s.name, artist: (s.ar || []).map(a => a.name).join(' / '), album: s.al?.name || '', artwork: (s.al?.picUrl || '').replace('http://', 'https://'), url: `https://music.163.com/song/media/outer/url?id=${s.id}.mp3`, duration: `${min}:${sec.toString().padStart(2, '0')}` }
+        })
+      }
+
+      async function searchItunes() {
+        const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=${maxResults}`
+        let data
+        try { const res = await fetch(url); data = await res.json() }
+        catch { const res = await fetch(`https://proxy.link2web.site`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, method: 'GET', mode: 'raw' }) }); const proxy = await res.json(); data = typeof proxy.body === 'string' ? JSON.parse(proxy.body) : proxy.body }
+        return (data?.results || []).map(t => ({ track: t.trackName, artist: t.artistName, album: t.collectionName, artwork: t.artworkUrl100?.replace('100x100', '600x600'), url: t.previewUrl, genre: t.primaryGenreName }))
+      }
+
+      try {
+        if (src === 'netease' || (src === 'auto' && isChinese)) {
+          const results = await searchNetease()
+          if (results) return { results, source: 'netease' }
+          if (src === 'netease') return { results: [], message: 'No results found' }
+        }
+        const results = await searchItunes()
+        return { results, source: 'itunes' }
+      } catch (e) { return { error: `Music search failed: ${e.message}` } }
+    }
+  })
+
+  caps.register('get_weather', {
+    description: 'Get current weather and 3-day forecast. Use city name or coordinates.',
+    icon: '⛅', category: 'Information',
+    schema: { type: 'object', properties: { city: { type: 'string', description: 'City name (e.g. "北京", "Tokyo")' }, latitude: { type: 'number' }, longitude: { type: 'number' } } },
+    handler: async ({ city, latitude, longitude }, ctx) => {
+      ctx.showActivity(`⛅ Weather: ${city || 'location'}`)
+      try {
+        let lat = latitude, lon = longitude
+        if (city && !lat) {
+          const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`)
+          const geo = await geoRes.json()
+          if (!geo.results?.length) return { error: `City not found: ${city}` }
+          lat = geo.results[0].latitude; lon = geo.results[0].longitude
+        }
+        if (!lat || !lon) return { error: 'Provide city or coordinates' }
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=3`
+        const res = await fetch(url)
+        const data = await res.json()
+        const WMO = { 0: '☀️ Clear', 1: '🌤️ Mostly clear', 2: '⛅ Partly cloudy', 3: '☁️ Overcast', 45: '🌫️ Fog', 51: '🌦️ Light drizzle', 61: '🌧️ Rain', 71: '❄️ Snow', 80: '🌧️ Showers', 95: '⛈️ Thunderstorm' }
+        return {
+          location: city || `${lat}, ${lon}`,
+          current: { temp: `${data.current.temperature_2m}°C`, humidity: `${data.current.relative_humidity_2m}%`, wind: `${data.current.wind_speed_10m} km/h`, condition: WMO[data.current.weather_code] || `Code ${data.current.weather_code}` },
+          forecast: data.daily.time.map((d, i) => ({ date: d, high: `${data.daily.temperature_2m_max[i]}°C`, low: `${data.daily.temperature_2m_min[i]}°C`, condition: WMO[data.daily.weather_code[i]] || `Code ${data.daily.weather_code[i]}` }))
+        }
+      } catch (e) { return { error: `Weather failed: ${e.message}` } }
+    }
+  })
+
+  caps.register('get_location', {
+    description: 'Get user\'s current location (lat/lng) via browser GPS.',
+    icon: '📍', category: 'Information',
+    schema: { type: 'object', properties: {} },
+    handler: (_, ctx) => {
+      ctx.showActivity('📍 Getting location...')
+      return new Promise((resolve) => {
+        if (!navigator.geolocation) { resolve({ error: 'Geolocation not supported' }); return }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) }),
+          (err) => resolve({ error: { 1: 'User denied location access', 2: 'Position unavailable', 3: 'Request timed out' }[err.code] || err.message }),
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+        )
+      })
+    }
+  })
+
+  caps.register('calculate', {
+    description: 'Evaluate a math expression. Supports +, -, *, /, ^, %, Math functions.',
+    icon: '🧮', category: 'Information', alwaysAvailable: true,
+    schema: { type: 'object', properties: { expression: { type: 'string', description: 'Math expression (e.g. "125 * 0.85", "Math.sqrt(144)")' } }, required: ['expression'] },
+    handler: ({ expression }) => {
+      try {
+        const safe = expression.replace(/[^0-9+\-*/().%^\s,eE]|(?:Math\.\w+)/g, (m) => {
+          if (/^Math\.\w+$/.test(m)) return m
+          return ''
+        })
+        const result = new Function(`return (${expression})`)()
+        if (typeof result !== 'number' || !isFinite(result)) return { error: 'Invalid expression' }
+        return { result, expression }
+      } catch (e) { return { error: `Eval failed: ${e.message}` } }
+    }
+  })
+
+  caps.register('get_wikipedia', {
+    description: 'Get Wikipedia article summary. More precise than web_search for factual/encyclopedic queries.',
+    icon: '📚', category: 'Information',
+    schema: { type: 'object', properties: { query: { type: 'string', description: 'Article title or search term' }, language: { type: 'string', enum: ['en', 'zh', 'ja', 'ko', 'fr', 'de', 'es'] } }, required: ['query'] },
+    handler: async ({ query, language }, ctx) => {
+      ctx.showActivity(`📚 Wikipedia: ${query}`)
+      const lang = language || 'en'
+      try {
+        const url = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`
+        const res = await fetch(url)
+        if (!res.ok) {
+          const searchUrl = `https://${lang}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=3&format=json`
+          const sRes = await fetch(searchUrl)
+          const sData = await sRes.json()
+          if (sData[1]?.length) return { suggestions: sData[1], message: `No exact match. Did you mean: ${sData[1].join(', ')}?` }
+          return { error: 'Article not found' }
+        }
+        const data = await res.json()
+        return { title: data.title, extract: data.extract, thumbnail: data.thumbnail?.source, url: data.content_urls?.desktop?.page }
+      } catch (e) { return { error: `Wikipedia failed: ${e.message}` } }
+    }
+  })
+
+  caps.register('get_stock', {
+    description: 'Get stock price and 5-day history. US (AAPL), HK (0700.HK), China A-shares (600519.SS).',
+    icon: '📈', category: 'Information',
+    schema: { type: 'object', properties: { symbol: { type: 'string', description: 'Stock ticker symbol' } }, required: ['symbol'] },
+    handler: async ({ symbol }, ctx) => {
+      ctx.showActivity(`📈 Stock: ${symbol}`)
+      try {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`
+        const res = await fetch(`https://proxy.link2web.site`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, method: 'GET', mode: 'raw' }) })
+        const proxy = await res.json()
+        const data = typeof proxy.body === 'string' ? JSON.parse(proxy.body) : proxy.body
+        const result = data?.chart?.result?.[0]
+        if (!result) return { error: `No data for ${symbol}` }
+        const meta = result.meta
+        const quotes = result.indicators?.quote?.[0]
+        return {
+          symbol: meta.symbol, currency: meta.currency,
+          price: meta.regularMarketPrice, previousClose: meta.previousClose,
+          change: ((meta.regularMarketPrice - meta.previousClose) / meta.previousClose * 100).toFixed(2) + '%',
+          history: (result.timestamp || []).map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: quotes?.close?.[i]?.toFixed(2) }))
+        }
+      } catch (e) { return { error: `Stock failed: ${e.message}` } }
+    }
+  })
+
+  caps.register('search_movie', {
+    description: 'Search movies via TMDB. Returns poster URLs, ratings, genres, overviews.',
+    icon: '🎬', category: 'Information',
+    schema: { type: 'object', properties: { query: { type: 'string' }, year: { type: 'number' } }, required: ['query'] },
+    handler: async ({ query, year }, ctx) => {
+      ctx.showActivity(`🎬 Movie: ${query}`)
+      const key = window._settingsCache?.tmdbKey
+      if (!key) return { error: 'TMDB API key not configured in Settings' }
+      try {
+        let url = `https://api.themoviedb.org/3/search/movie?api_key=${key}&query=${encodeURIComponent(query)}&language=zh-CN`
+        if (year) url += `&year=${year}`
+        const res = await fetch(url)
+        const data = await res.json()
+        return { results: (data.results || []).slice(0, 6).map(m => ({ id: m.id, title: m.title, originalTitle: m.original_title, year: m.release_date?.slice(0, 4), overview: m.overview?.slice(0, 150), rating: m.vote_average, poster: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null })) }
+      } catch (e) { return { error: `Movie search failed: ${e.message}` } }
+    }
+  })
+
+  caps.register('get_movie_detail', {
+    description: 'Get detailed movie info: cast, crew, runtime, budget. Use after search_movie.',
+    icon: '🎬', category: 'Information',
+    schema: { type: 'object', properties: { movie_id: { type: 'number' } }, required: ['movie_id'] },
+    handler: async ({ movie_id }, ctx) => {
+      ctx.showActivity(`🎬 Movie detail: #${movie_id}`)
+      const key = window._settingsCache?.tmdbKey
+      if (!key) return { error: 'TMDB API key not configured' }
+      try {
+        const res = await fetch(`https://api.themoviedb.org/3/movie/${movie_id}?api_key=${key}&append_to_response=credits&language=zh-CN`)
+        const m = await res.json()
+        return { title: m.title, originalTitle: m.original_title, year: m.release_date?.slice(0, 4), runtime: m.runtime, genres: m.genres?.map(g => g.name), overview: m.overview, rating: m.vote_average, poster: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null, director: m.credits?.crew?.find(c => c.job === 'Director')?.name, cast: m.credits?.cast?.slice(0, 8).map(c => ({ name: c.name, character: c.character })) }
+      } catch (e) { return { error: `Movie detail failed: ${e.message}` } }
+    }
+  })
+
   // ── Maps ──
 
   caps.register('map', {

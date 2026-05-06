@@ -169,3 +169,31 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Helvetica Neue
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* ── Animations ── */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes windowOpen { from { opacity: 0; transform: scale(0.92) translateY(12px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes windowClose { to { opacity: 0; transform: scale(0.95) translateY(8px); } }
+@keyframes bubbleIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes typing { 0%, 100% { opacity: 0.2; } 50% { opacity: 0.8; } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.window { animation: windowOpen 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+.chat-bubble { animation: bubbleIn 0.2s ease; }
+.typing-cursor { animation: typing 1s infinite; }
+
+/* ── Transitions ── */
+.window { transition: box-shadow 0.2s, opacity 0.15s; }
+.dock-item { transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.15s; }
+#chat-panel { transition: width 0.2s ease; }
+.chat-bubble { transition: opacity 0.15s; }
+
+/* ── Context Menu ── */
+.context-menu { animation: fadeIn 0.12s ease; }
+
+/* ── Spotlight ── */
+.spotlight-overlay { animation: fadeIn 0.15s ease; }
+
+/* ── Notification ── */
+.notification { animation: fadeIn 0.2s ease; }

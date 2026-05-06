@@ -133,6 +133,10 @@ onMounted(() => {
 
   // Reflow windows on browser resize
   window.addEventListener('resize', onWindowResize)
+
+  // Drag-drop file support
+  document.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' })
+  document.addEventListener('drop', onFileDrop)
 })
 
 onUnmounted(() => {
@@ -140,6 +144,7 @@ onUnmounted(() => {
   EventBus.off('window.open', openWindow)
   document.removeEventListener('keydown', onGlobalKeydown)
   window.removeEventListener('resize', onWindowResize)
+  document.removeEventListener('drop', onFileDrop)
   agent.stopProactiveLoop()
 })
 
@@ -147,6 +152,37 @@ let _resizeTimer = null
 function onWindowResize() {
   clearTimeout(_resizeTimer)
   _resizeTimer = setTimeout(() => windows.reflow(), 100)
+}
+
+function onFileDrop(e) {
+  e.preventDefault()
+  const vfs = useVFSStore()
+  const files = e.dataTransfer?.files
+  if (!files || files.length === 0) return
+
+  for (const file of files) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const destPath = `/home/user/Desktop/${file.name}`
+      if (file.type.startsWith('text/') || file.size < 1024 * 1024) {
+        vfs.writeFile(destPath, reader.result)
+        EventBus.emit('notify', { text: `Dropped: ${file.name}`, type: 'success' })
+      } else {
+        // For binary/large files, store as base64 data URL
+        const b64Reader = new FileReader()
+        b64Reader.onload = () => {
+          vfs.writeFile(destPath, b64Reader.result)
+          EventBus.emit('notify', { text: `Dropped: ${file.name}`, type: 'success' })
+        }
+        b64Reader.readAsDataURL(file)
+      }
+    }
+    if (file.type.startsWith('text/') || file.size < 1024 * 1024) {
+      reader.readAsText(file)
+    } else {
+      reader.readAsDataURL(file)
+    }
+  }
 }
 
 function onGlobalKeydown(e) {
