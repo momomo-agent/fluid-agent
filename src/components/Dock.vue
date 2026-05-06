@@ -42,7 +42,7 @@ function openApp(type) {
 }
 
 function focusRunning(id) {
-  const win = store.windows.get(id)
+  const win = store.windows.find(w => w.id === id)
   if (win?.minimized) store.focus(id)
   else store.focus(id)
 }
