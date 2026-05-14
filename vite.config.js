@@ -89,6 +89,9 @@ function apiProxyPlugin() {
 }
 
 export default defineConfig({
+  // GitHub Pages serves this repo at https://momomo-agent.github.io/fluid-agent/.
+  // The dev server stays at root so the in-process API proxy works unchanged.
+  base: process.env.NODE_ENV === 'production' ? '/fluid-agent/' : '/',
   plugins: [vue(), apiProxyPlugin()],
   server: {
     port: 8765,
